@@ -19,6 +19,8 @@ Consumer 預設流程為 3 分鐘快速診斷。一般模式按下 Start 時會�
 | 套件建置 | 無 npm、無 bundler、無編譯步驟 |
 | 規格基準 | `Web Application/LagCheck_v1.0.13_System_Rebuild_Spec.docx` |
 | UI 基準 | `Web Application/UI 參考.png` |
+| GitHub Repository | `https://github.com/BillHorng/NetPulse_Consumer` |
+| GitHub Pages | `https://billhorng.github.io/NetPulse_Consumer/` |
 
 本文件提供後續開發、維護、測試及部署所需的實務資訊。原始規格書仍是功能需求與驗收條件的最高依據；本文件著重目前 NetPulse 程式的實際結構與維護方式。
 
@@ -33,6 +35,14 @@ NetPulse 透過瀏覽器的 HTTPS `fetch` 請求測量應用層延遲，並根�
 - Probe timeout rate
 
 頁面會連線 Cloudflare 與 AWS 取得網路環境及執行測試。樣本只存在目前頁面的記憶體中，不會送往 NetPulse 自有後端，也不會在重新整理後保留；只有使用者在進階設定中手動設定 HTTPS Webhook 時，完整報告才會傳送到該 URL。
+
+### 2.1 設備 IP 資料契約
+
+- 畫面欄位為 `#device-ip`，JSON 報告欄位為 `clientInfo.deviceIp`，中英文文字報告分別使用「設備 IP」與 `Device IP`。
+- `detectDeviceIps()` 建立不含 STUN／TURN 的 `RTCPeerConnection`，只接受 `typ host` candidate；不以 server-reflexive、出口 IP 或 Cloudflare `trace.ip` 代替。
+- 偵測結果會排除 mDNS `.local`、loopback、未指定位址及格式錯誤的 candidate，並優先排列 RFC1918 IPv4。
+- 瀏覽器不提供 host candidate 時，畫面與報告顯示「瀏覽器未提供」／`Not exposed by browser`；這是有效狀態，不應判定為檢測失敗。
+- Cloudflare trace 目前只使用 `colo` 與 `loc`，即使回應含有 `ip`，程式也不顯示或寫入報告。
 
 ## 3. 目錄與檔案
 
@@ -345,6 +355,13 @@ export const VERSION = '1.0.1';
 3. 完成第 8.3 節 Smoke Test。
 4. 檢查 README 與本手冊是否需要同步。
 5. 保存測試結果與版本差異紀錄。
+
+### 10.1 2026-09-10 部署紀錄
+
+- 功能基準提交：`d8ed28a`（設備 IP 取代 Public IP）。
+- 遠端分支：`main`。
+- Pages 驗證：首頁、`app.mjs` 與設備 IP 欄位均已更新。
+- 回歸結果：核心測試 `PASS 10/10`；Edge 152、1366 × 650 載入與首屏版面正常。
 
 ## 11. 已知限制與風險
 
