@@ -6,7 +6,7 @@
 
 一般模式採固定三階段導引：「確認環境資訊 → 進行檢測 → 將報告交給 IT」。檢測期間只提供「取消檢測」，完成後才提供「重新檢測」；工程格式匯出、Percentile 切換、分項評分及技術設定均收在進階模式。
 
-Consumer 預設採一頁式摘要：完整曲線不佔用首屏，需要時可按「查看即時圖表」在同頁展開，再按一次隱藏。
+Consumer 預設採一頁式白色摘要：桌面版頁首、環境資訊與主內容以 1280 px 最大寬度置中，三張狀態卡等寬排列。完整曲線不佔用首屏，需要時可按「查看即時圖表」在同頁展開，再按一次隱藏。
 
 NetPulse 是一套可部署於靜態網站的瀏覽器式網路品質監測工具。它以 HTTPS `fetch` 測量應用層請求延遲；Probe 失敗／逾時率不等同 ICMP packet loss。
 
@@ -26,7 +26,7 @@ NetPulse 是一套可部署於靜態網站的瀏覽器式網路品質監測工�
 - Primary／Fallback 雙向 failover
 - 一般模式最後 30 秒自動執行 2-flow HTTPS 下載測速與 Bufferbloat delta（單次最多約 100 MB）
 - Canvas 即時／百分位圖表，不依賴外部圖表 CDN
-- 中英文、深色模式、LocalStorage 設定保存
+- 中英文、一般模式固定白色背景、進階模式可於當次工作階段切換深色，以及 LocalStorage 設定保存
 - JSON、CSV、PNG 與 HTTPS Webhook
 - Online／Offline、Visibility、Auto Stop 與 URL automation
 

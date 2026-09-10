@@ -179,12 +179,12 @@ function setChartMode(mode) {
 function toggleTheme() {
   const dark = document.documentElement.dataset.theme === 'dark';
   document.documentElement.dataset.theme = dark ? '' : 'dark';
-  localStorage.setItem('netpulse-theme', dark ? 'light' : 'dark');
   requestAnimationFrame(drawChart);
 }
 
 function toggleAdvanced() {
   document.body.classList.toggle('advanced');
+  if (!document.body.classList.contains('advanced')) document.documentElement.dataset.theme = '';
   updateAdvancedControl();
   requestAnimationFrame(drawChart);
 }
@@ -936,5 +936,5 @@ function finiteCsv(value) { return Number.isFinite(value) ? value.toFixed(3) : '
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
 function roundRect(context, x, y, width, height, radius) { context.beginPath(); context.roundRect(x, y, width, height, radius); }
 
-const storedTheme = localStorage.getItem('netpulse-theme');
-if (storedTheme === 'dark' || (!storedTheme && matchMedia('(prefers-color-scheme: dark)').matches)) document.documentElement.dataset.theme = 'dark';
+// Consumer mode always opens in the light theme. Dark mode remains opt-in while viewing advanced information.
+document.documentElement.dataset.theme = '';

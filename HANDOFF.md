@@ -99,11 +99,7 @@ LocalStorage key 為：
 netpulse-consumer-settings-v1
 ```
 
-深色模式另存於：
-
-```text
-netpulse-theme
-```
+一般模式固定使用白色背景，不讀取系統深色偏好或同網域其他應用的主題設定；進階模式仍可於當次工作階段切換深色，返回一般模式時會恢復白色。桌面版的頁首、環境資訊列與主內容統一使用 1280 px 最大寬度並置中，Latency、Jitter、失敗／逾時三張狀態卡採等寬排列。
 
 ### 5.2 Probe 流程
 
@@ -279,6 +275,8 @@ Endpoint、Fallback、Download URL、Stress 與 Webhook 不接受 Query String �
 - 最後 30 秒測速階段的 02:30／03:00 邊界
 
 交接時的執行結果為：`PASS 10/10`。
+
+本次 UI 回歸另以 Chrome 驗證 1920 × 768 與 1366 × 650：一般模式均為白色背景、主要區塊左右邊界一致，1366 × 650 可在首屏完整顯示而不需捲動。
 
 ### 8.2 已完成的瀏覽器 Smoke Test
 
