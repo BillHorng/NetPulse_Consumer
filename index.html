@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https:; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="theme-color" content="#0869ed">
+  <meta name="description" content="NetPulse 瀏覽器式網路品質監測平台">
+  <title>NetPulse｜網路品質監測平台</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body class="consumer-mode">
+  <noscript>NetPulse 需要 JavaScript 才能執行網路品質監測。</noscript>
+  <div class="app-shell" id="report-root">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="NetPulse 首頁">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M5 25h8l4-12 7 24 6-20 4 8h9"/></svg></span>
+        <span><strong>NetPulse</strong><small>v<span id="version"></span></small></span>
+        <em data-i18n="subtitle">網路品質監測平台</em>
+      </a>
+      <div class="top-actions">
+        <div class="segmented language" aria-label="Language"><button data-lang="zh" class="active">中文</button><button data-lang="en">EN</button></div>
+        <button class="icon-button" id="theme-button" aria-label="切換深色模式" title="Theme">☼</button>
+        <button class="icon-button" id="help-button" aria-label="開啟說明" title="Help">?</button>
+        <span class="simple-state" id="simple-status"><i></i><span>Ready</span></span>
+        <button class="button advanced-button" id="advanced-button" aria-expanded="false"><span>☷</span><span data-role="advanced-label">進階資訊</span></button>
+        <button class="button primary quick-start" id="start-button"><span>▶</span><span data-i18n="start">開始 3 分鐘檢測</span></button>
+        <button class="button" id="pause-button"><span>Ⅱ</span><span data-i18n="pause">暫停</span></button>
+        <button class="button" id="reset-button"><span>↻</span><span data-i18n="reset">重設</span></button>
+        <details class="export-control"><summary class="button"><span>⇩</span><span data-i18n="export">匯出報告</span></summary><div><button data-export="json">JSON</button><button data-export="csv">CSV</button><button data-export="png">PNG</button></div></details>
+      </div>
+    </header>
+
+    <section class="environment-strip" aria-label="Client information">
+      <div><span class="env-icon">▣</span><p><small data-i18n="os">作業系統</small><strong id="client-os">—</strong></p></div>
+      <div><span class="env-icon">◉</span><p><small data-i18n="browser">瀏覽器</small><strong id="client-browser">—</strong></p></div>
+      <div><span class="env-icon">◷</span><p><small data-i18n="localTime">本機時間</small><strong id="local-time">—</strong></p></div>
+      <div><span class="env-icon">⊕</span><p><small data-i18n="timezone">時區</small><strong id="timezone">—</strong></p></div>
+      <div><span class="env-icon">▤</span><p><small>Public IP</small><strong id="public-ip">—</strong></p></div>
+      <div><span class="env-icon">▥</span><p><small>CDN Node / Colo</small><strong id="colo">—</strong></p></div>
+      <div><span class="env-icon">●</span><p><small>Location</small><strong id="location">—</strong></p></div>
+      <div><span class="env-icon">◇</span><p><small>Active Endpoint</small><strong id="active-endpoint">Primary</strong></p></div>
+    </section>
+
+    <section class="quick-journey" aria-label="Diagnostic progress">
+      <div class="journey-step complete" data-step="environment"><span>1</span><p><small data-i18n="stepOne">步驟一</small><strong data-i18n="phaseEnvironment">確認裝置與網路資訊</strong></p></div><i>→</i>
+      <div class="journey-step active" data-step="testing"><span>2</span><p><small data-i18n="stepTwo">步驟二</small><strong data-i18n="phaseTest">進行 3 分鐘檢測</strong></p></div><i>→</i>
+      <div class="journey-step" data-step="report"><span>3</span><p><small data-i18n="stepThree">步驟三</small><strong data-i18n="phaseReport">將文字報告交給 IT</strong></p></div>
+    </section>
+    <div class="quick-notice" id="quick-notice"><span>●</span><span data-i18n="keepOpen">請保持此頁面開啟，並繼續操作發生問題的系統或網站。</span></div>
+    <div class="connection-alert" id="connection-alert" role="alert"><span>!</span><span data-i18n="unstableAlert">目前連線不穩定，請等待檢測完成並將報告交給 IT。</span></div>
+
+    <main class="dashboard">
+      <section class="workspace">
+        <div class="metric-grid">
+          <article class="metric-card latency"><div class="card-heading"><span class="metric-icon">ϟ</span><h2 data-i18n="latency">連線延遲</h2><span class="trend" id="latency-trend">—</span></div><div class="metric-values four"><p><small data-i18n="current">目前</small><strong id="latency-current">—</strong></p><p><small data-i18n="average">平均</small><strong id="latency-average">—</strong></p><p><small data-i18n="minimum">最低</small><strong id="latency-min">—</strong></p><p><small data-i18n="maximum">最高</small><strong id="latency-max">—</strong></p></div></article>
+          <article class="metric-card jitter"><div class="card-heading"><span class="metric-icon">≋</span><h2>Jitter</h2></div><div class="metric-values two"><p><small data-i18n="current">目前</small><strong id="jitter-current">—</strong></p><p><small>MAD</small><strong id="mad-current">—</strong></p></div></article>
+          <article class="metric-card failure"><div class="card-heading"><span class="metric-icon">!</span><h2 data-i18n="failure">失敗／逾時</h2></div><div class="metric-values four"><p><small data-i18n="failCount">失敗數</small><strong id="fail-count">0</strong></p><p><small data-i18n="failureRate">失敗率</small><strong id="fail-rate">0.0%</strong></p><p><small data-i18n="timeoutRate">逾時率</small><strong id="timeout-rate">0.0%</strong></p><p><small>Wilson 95%</small><strong id="wilson-rate">0.0%</strong></p></div></article>
+          <article class="metric-card spike"><div class="card-heading"><span class="metric-icon">▥</span><h2 data-i18n="maximumSpike">最大尖峰</h2></div><div class="metric-values two"><p><small data-i18n="spikeCount">尖峰數</small><strong id="spike-count">0</strong></p><p><small data-i18n="maximumSpike">最大尖峰</small><strong id="max-spike">—</strong></p></div></article>
+        </div>
+
+        <div class="consumer-chart-row">
+          <article class="panel chart-panel">
+            <div class="panel-toolbar"><div class="segmented"><button data-chart="live" class="active" data-i18n="liveChart">即時曲線</button><button data-chart="percentile">Percentile</button></div><span class="chart-window" data-i18n="last60">◷ 最近 60 秒</span></div>
+            <div class="chart-legend"><span class="blue">— <span>Latency</span></span><span class="purple">— <span>Jitter</span></span><span class="red">● <span>Timeout</span></span><span class="orange">● <span>Spike</span></span><span class="gray">● <span>Warm-up</span></span></div>
+            <div class="canvas-wrap"><canvas id="chart" role="img" aria-label="Latency and jitter chart"></canvas><div class="chart-empty" id="chart-empty" data-i18n="chartEmpty">開始監測後，圖表會顯示即時網路品質。</div></div>
+          </article>
+          <article class="panel highlights-panel">
+            <h2><span>✦</span><span data-i18n="keySummary">重點摘要</span></h2>
+            <div class="highlight-list">
+              <div><span class="highlight-icon">◎</span><p><small data-i18n="overallQuality">整體品質</small><strong id="highlight-overall">等待資料</strong></p></div>
+              <div><span class="highlight-icon">✓</span><p><small data-i18n="connectionStability">連線穩定度</small><strong id="highlight-stability">等待資料</strong></p></div>
+              <div><span class="highlight-icon">ϟ</span><p><small data-i18n="responsiveness">反應速度</small><strong id="highlight-response">等待資料</strong></p></div>
+              <div><span class="highlight-icon">≋</span><p><small data-i18n="consistency">延遲一致性</small><strong id="highlight-consistency">等待資料</strong></p></div>
+              <div><span class="highlight-icon">↓</span><p><small data-i18n="downloadSpeed">下載速度</small><strong id="highlight-speed" data-tone="neutral">最後 30 秒測量</strong></p></div>
+            </div>
+            <div class="sample-progress"><div><span data-i18n="ratingProgress">評級進度</span><b id="highlight-progress-label">0 / 60</b></div><div class="progress-track"><i id="highlight-progress"></i></div><small id="highlight-progress-note">尚需 60 筆樣本</small></div>
+            <div class="quick-test-footer"><p><small data-i18n="estimatedRemaining">預計剩餘時間</small><strong id="quick-test-remaining">03:00</strong><em id="quick-test-phase">網路品質監測中</em></p><div><button class="mini-button chart-toggle" id="chart-toggle"><span>⌁</span> <span data-role="chart-toggle-label">查看即時圖表</span></button><button class="mini-button report-button" id="report-button" disabled><span>▤</span> <span data-i18n="itReport">IT 文字報告</span></button></div></div>
+          </article>
+        </div>
+
+        <div class="summary-grid">
+          <article class="panel summary-panel"><h2><span>▥</span> Percentile / Statistics</h2><div class="percentile-grid" id="percentile-grid"></div></article>
+          <article class="panel rating-panel"><h2><span>◇</span><span data-i18n="ratingTitle">網路品質評級</span></h2><div class="rating-content"><div class="gauge"><div class="gauge-ring"><strong id="grade">—</strong></div><p><span data-i18n="score">總分</span><b id="score">— / 100</b><small id="rating-unlock"></small></p></div><div class="score-bars" id="score-bars"></div></div></article>
+          <article class="panel buffer-panel"><h2><span>▥</span> Stress / Bufferbloat</h2><dl><div><dt>Idle Avg</dt><dd id="idle-average">—</dd></div><div><dt>Under-load Avg</dt><dd id="load-average">—</dd></div><div><dt>Congestion Delta</dt><dd id="buffer-delta">—</dd></div><div><dt>Download Speed</dt><dd id="download-speed">—</dd></div><div><dt>Flow Count</dt><dd id="flow-count">0</dd></div><div><dt>Traffic Limit</dt><dd>100 MB</dd></div></dl></article>
+        </div>
+      </section>
+
+      <aside class="sidebar">
+        <article class="panel settings-panel"><div class="panel-title"><h2>⚙ <span data-i18n="settings">測試設定</span></h2><button class="mini-button" id="defaults-button" data-i18n="restoreDefaults">還原預設</button></div><form id="settings-form" novalidate>
+          <label class="wide"><span>Primary Endpoint</span><input name="endpoint" type="url" autocomplete="off"></label>
+          <label class="wide"><span>Fallback Endpoint</span><input name="fallbackEndpoint" type="url" autocomplete="off"></label>
+          <label class="wide"><span>Download URL</span><input name="downloadUrl" type="url" autocomplete="off"></label>
+          <label><span>Interval (ms)</span><input name="intervalMs" type="number" min="200" max="2000" step="100"></label>
+          <label><span>Timeout (ms)</span><input name="timeoutMs" type="number" min="1000" max="5000" step="100"></label>
+          <label><span>Failover Threshold</span><input name="failoverThreshold" type="number" min="3" max="10"></label>
+          <label><span>Percentile N</span><input name="percentileN" type="number" min="30" max="500"></label>
+          <label><span>Auto Stop (min)</span><input name="autoStopMin" type="number" min="0" max="1440"></label>
+          <label class="toggle-label"><span>Stress Test</span><input name="stress" type="checkbox" role="switch"></label>
+          <label class="wide"><span>Webhook URL</span><input name="webhook" type="url" placeholder="https://example.com/report" autocomplete="off"></label>
+        </form><p class="form-message" id="form-message" role="status"></p></article>
+
+        <article class="panel status-panel"><div class="panel-title"><h2>▣ <span data-i18n="currentStatus">目前狀態</span></h2><span class="status stopped" id="status"><i></i><span data-i18n="ready">Ready</span></span></div><dl><div><dt>Samples</dt><dd id="sample-count">0</dd></div><div><dt data-i18n="elapsed">運行時間</dt><dd id="elapsed">00:00:00</dd></div><div><dt>Consecutive Failures</dt><dd id="consecutive-failures">0</dd></div><div><dt data-i18n="nextProbe">下次探測</dt><dd id="next-probe">—</dd></div><div class="wide"><dt>Active Endpoint</dt><dd id="active-endpoint-detail">Primary</dd></div></dl></article>
+
+        <article class="panel log-panel"><div class="panel-title"><h2>▤ Event Log</h2><select id="log-filter" aria-label="Event filter"><option value="all" data-i18n="allEvents">全部事件</option><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option></select></div><div class="log-table"><div class="log-header"><span data-i18n="time">時間</span><span data-i18n="event">事件</span></div><div id="event-log"><p class="empty-log" data-i18n="noEvents">尚無事件</p></div></div></article>
+      </aside>
+    </main>
+    <footer><span>NetPulse measures browser HTTPS request latency, not ICMP ping.</span><span id="online-indicator">● Online</span></footer>
+  </div>
+
+  <dialog id="help-dialog"><div class="dialog-heading"><div><small>NETPULSE GUIDE</small><h2 data-i18n="helpTitle">如何解讀監測結果</h2></div><button id="help-close" aria-label="Close">×</button></div><div class="help-grid"><section><h3 data-i18n="helpProbeTitle">這不是 ICMP Ping</h3><p data-i18n="helpProbe">NetPulse 透過瀏覽器 HTTPS 請求測量應用層往返時間。失敗／逾時率代表 Probe 請求結果，不等同 L3 封包遺失率。</p></section><section><h3>Quality Rating</h3><p data-i18n="helpRating">評分綜合延遲、Jitter、Wilson 失敗率、尖峰與 Bufferbloat，並以最差瓶頸限制總分。</p></section><section><h3>Privacy</h3><p data-i18n="helpPrivacy">頁面會連線 Cloudflare 與 AWS 取得網路環境及執行測試。樣本預設只存在記憶體中；只有手動設定 Webhook 時才會傳送完整報告。</p></section></div></dialog>
+  <dialog id="report-dialog" class="report-dialog">
+    <div class="dialog-heading"><div><small>NETPULSE IT REPORT</small><h2 data-i18n="reportTitle">網路檢測文字摘要</h2></div><button id="report-close" aria-label="Close">×</button></div>
+    <div class="report-body">
+      <div class="incident-fields">
+        <label><span data-i18n="symptom">當時遇到的狀況</span><select id="incident-type"><option value="slow" data-i18n="symptomSlow">網路變慢</option><option value="disconnect" data-i18n="symptomDisconnect">連線中斷</option><option value="meeting" data-i18n="symptomMeeting">視訊／語音卡頓</option><option value="unreachable" data-i18n="symptomUnreachable">系統或網站連不上</option><option value="other" data-i18n="symptomOther">其他</option></select></label>
+        <label><span data-i18n="additionalNote">補充描述（選填）</span><textarea id="incident-note" rows="2" data-i18n-placeholder="notePlaceholder" placeholder="例如：開會時聲音斷斷續續、公司系統無法登入"></textarea></label>
+      </div>
+      <p class="report-hint" data-i18n="reportHint">請複製下方內容提供給 IT；報告不會自動上傳。</p>
+      <pre id="text-report" tabindex="0"></pre>
+      <div class="report-actions"><span id="report-action-status" role="status"></span><button class="button" id="download-report"><span>⇩</span><span data-i18n="downloadTxt">下載 TXT</span></button><button class="button primary" id="copy-report"><span>▣</span><span data-i18n="copyText">複製文字</span></button></div>
+    </div>
+  </dialog>
+  <script type="module" src="./app.mjs"></script>
+</body>
+</html>

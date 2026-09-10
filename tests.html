@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>NetPulse Core Tests</title></head>
+<body><h1>NetPulse Core Tests</h1><pre id="result">Running…</pre>
+<script type="module">
+import { percentile, mad, wilsonUpper, metricScore, isSpike, calculateStats, calculateRating, parseAutomation, normalizeUrl, isFinalPhase } from './core.mjs';
+const tests = [];
+const test = (name, fn) => tests.push([name, fn]);
+const equal = (actual, expected, tolerance = 1e-8) => {
+  if (typeof expected === 'number' && Math.abs(actual - expected) <= tolerance) return;
+  if (actual !== expected) throw new Error(`expected ${expected}, received ${actual}`);
+};
+test('percentile handles empty and interpolation', () => { equal(percentile([], .5), null); equal(percentile([1], .95), 1); equal(percentile([0, 10, 20, 30], .75), 22.5); });
+test('MAD handles constant and outlier data', () => { equal(mad([4, 4, 4]), 0); equal(mad([1, 2, 3, 100]), 1); });
+test('Wilson handles zero and all failures', () => { equal(wilsonUpper(0, 0), 0); equal(wilsonUpper(10, 10), 1); if (!(wilsonUpper(0, 10) > 0)) throw new Error('small sample upper bound must exceed zero'); });
+test('metric score boundaries', () => { equal(metricScore(1, 2, 10), 100); equal(metricScore(10, 2, 10), 0); equal(metricScore(6, 2, 10), 50); });
+test('spike uses floor and adaptive baseline', () => { equal(isSpike(101, []), true); equal(isSpike(99, []), false); const history = [40, 42, 39, 41, 40].map((latency) => ({ status: 'ok', warmUp: false, latency })); equal(isSpike(101, history), true); equal(isSpike(90, history), false); });
+test('stats classify timeout and exclude warmup latency', () => { const samples = [{ status:'ok', latency:100, warmUp:true, spike:false }, { status:'ok', latency:20, warmUp:false, spike:false, jitter:5 }, { status:'timeout', latency:null, warmUp:false, spike:true }]; const stats = calculateStats(samples, 100); equal(stats.mean, 20); equal(stats.failures, 1); equal(stats.timeouts, 1); });
+test('rating unlock and bottleneck cap', () => { const stats = { p50:20, p95:30, jitter:4, mad:3, wilsonFailure:.16, spikeRate:0, bufferDelta:null }; equal(calculateRating(stats, 29, 100).score, null); const rating = calculateRating(stats, 30, 100); if (rating.score > 25) throw new Error('loss bottleneck cap failed'); });
+test('URL automation clamps safe options and ignores destinations', () => { const parsed = parseAutomation('?host=example.com&download=https://example.com/file&webhook=https://example.com/report&stress=1&interval=50&timeout=9999&autostart=true&samples=30&export=json,png'); equal(parsed.settings.endpoint, 'https://checkip.amazonaws.com/'); equal(parsed.settings.downloadUrl, 'https://speed.cloudflare.com/__down?bytes=10000000'); equal(parsed.settings.stress, false); equal(parsed.settings.intervalMs, 200); equal(parsed.settings.timeoutMs, 5000); equal(parsed.autostart, true); equal(parsed.exports.length, 2); equal('webhook' in parsed, false); });
+test('HTTPS-only URL validation rejects insecure destinations', () => { let rejected = false; try { normalizeUrl('http://example.com', { httpsOnly: true }); } catch { rejected = true; } equal(rejected, true); equal(normalizeUrl('example.com', { httpsOnly: true }), 'https://example.com/'); });
+test('final phase includes 02:30 and excludes 03:00 boundary', () => { equal(isFinalPhase(149999, 180000, 30000), false); equal(isFinalPhase(150000, 180000, 30000), true); equal(isFinalPhase(179999, 180000, 30000), true); equal(isFinalPhase(180000, 180000, 30000), false); });
+let passed = 0; const failures = [];
+for (const [name, fn] of tests) { try { fn(); passed += 1; } catch (error) { failures.push(`${name}: ${error.message}`); } }
+const result = document.querySelector('#result');
+result.dataset.status = failures.length ? 'failed' : 'passed';
+result.textContent = failures.length ? `FAIL ${passed}/${tests.length}\n${failures.join('\n')}` : `PASS ${passed}/${tests.length}`;
+</script></body></html>
