@@ -24,6 +24,7 @@ NetPulse 是一套可部署於靜態網站的瀏覽器式網路品質監測工�
 - Adaptive spike detection 與 Wilson 95% failure upper bound
 - A+／A／B／C／F 動態品質評級與 bottleneck cap
 - Primary／Fallback 雙向 failover
+- 設備 IP 最佳努力偵測；只接受 WebRTC host candidate，不使用或回報出口 IP
 - 一般模式最後 30 秒自動執行 2-flow HTTPS 下載測速與 Bufferbloat delta（單次最多約 100 MB）
 - Canvas 即時／百分位圖表，不依賴外部圖表 CDN
 - 中英文、一般模式固定白色背景、進階模式可於當次工作階段切換深色，以及 LocalStorage 設定保存
@@ -42,4 +43,4 @@ NetPulse 是一套可部署於靜態網站的瀏覽器式網路品質監測工�
 
 ## 隱私
 
-頁面會連線 Cloudflare 與 AWS 取得網路環境及執行測試。測試樣本預設僅保存在目前分頁的記憶體，不會跨重新整理保存；只有使用者在進階設定中手動設定 Webhook 時，完整 JSON 報告才會送往該 HTTPS URL。
+頁面會透過瀏覽器 WebRTC host candidate 嘗試取得設備 IP，並連線 Cloudflare 與 AWS 取得 CDN 資訊及執行測試；不會顯示或寫入出口 IP。Chrome 等瀏覽器可能基於隱私政策隱藏設備 IP，此時會顯示「瀏覽器未提供」。測試樣本預設僅保存在目前分頁的記憶體，不會跨重新整理保存；只有使用者在進階設定中手動設定 Webhook 時，完整 JSON 報告才會送往該 HTTPS URL。

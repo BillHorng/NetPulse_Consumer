@@ -9,7 +9,7 @@ const $$ = (selector) => [...document.querySelectorAll(selector)];
 const copy = {
   zh: {
     subtitle: '網路品質監測平台', start: '開始 3 分鐘檢測', startAdvanced: '開始監測', pause: '暫停', cancel: '取消檢測', reset: '重設', retry: '重新檢測', export: '匯出報告',
-    os: '作業系統', browser: '瀏覽器', localTime: '本機時間', timezone: '時區', latency: '連線延遲',
+    os: '作業系統', browser: '瀏覽器', localTime: '本機時間', timezone: '時區', deviceIp: '設備 IP', deviceIpUnavailable: '瀏覽器未提供', latency: '連線延遲',
     current: '目前', average: '平均', minimum: '最低', maximum: '最高', failure: '失敗／逾時',
     failCount: '失敗數', failureRate: '失敗率', timeoutRate: '逾時率', maximumSpike: '最大尖峰', spikeCount: '尖峰數',
     liveChart: '即時曲線', last60: '◷ 最近 60 秒', chartEmpty: '開始監測後，圖表會顯示即時網路品質。',
@@ -27,7 +27,7 @@ const copy = {
   },
   en: {
     subtitle: 'Network Quality Monitor', start: 'Start 3-minute Check', startAdvanced: 'Start Monitoring', pause: 'Pause', cancel: 'Cancel Check', reset: 'Reset', retry: 'Run Again', export: 'Export',
-    os: 'Operating System', browser: 'Browser', localTime: 'Local Time', timezone: 'Timezone', latency: 'Connection Latency',
+    os: 'Operating System', browser: 'Browser', localTime: 'Local Time', timezone: 'Timezone', deviceIp: 'Device IP', deviceIpUnavailable: 'Not exposed by browser', latency: 'Connection Latency',
     current: 'Current', average: 'Average', minimum: 'Minimum', maximum: 'Maximum', failure: 'Fail / Timeout',
     failCount: 'Fail Count', failureRate: 'Failure %', timeoutRate: 'Timeout %', maximumSpike: 'Maximum Spike', spikeCount: 'Spike Count',
     liveChart: 'Live Chart', last60: '◷ Last 60 seconds', chartEmpty: 'Start monitoring to see live network quality.',
@@ -165,6 +165,8 @@ function applyLanguage() {
   document.documentElement.lang = settings.lang === 'en' ? 'en' : 'zh-Hant';
   $$('[data-i18n]').forEach((node) => { const value = copy[settings.lang][node.dataset.i18n]; if (value) node.textContent = value; });
   $$('[data-i18n-placeholder]').forEach((node) => { const value = copy[settings.lang][node.dataset.i18nPlaceholder]; if (value) node.placeholder = value; });
+  const deviceIp = $('#device-ip');
+  if (deviceIp?.dataset.unavailable === 'true') deviceIp.textContent = deviceIp.title = copy[settings.lang].deviceIpUnavailable;
   $$('.language button').forEach((button) => button.classList.toggle('active', button.dataset.lang === settings.lang));
   updateAdvancedControl();
 }
@@ -692,13 +694,60 @@ async function detectClient() {
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const offset = -new Date().getTimezoneOffset();
   setText('timezone', `${zone} (UTC${offset >= 0 ? '+' : ''}${offset / 60})`); renderClock();
+  const deviceIps = await detectDeviceIps();
+  const deviceIp = deviceIps.length ? deviceIps.join(' / ') : copy[settings.lang].deviceIpUnavailable;
+  const deviceIpNode = $('#device-ip');
+  deviceIpNode.dataset.unavailable = String(!deviceIps.length);
+  setText('device-ip', deviceIp);
+  deviceIpNode.title = deviceIp;
   try {
     const response = await fetch('https://www.cloudflare.com/cdn-cgi/trace', { cache: 'no-store' });
     const trace = Object.fromEntries((await response.text()).trim().split('\n').map((line) => line.split('=')));
-    setText('public-ip', trace.ip || '—'); setText('colo', trace.colo || '—'); setText('location', trace.loc || '—');
-  } catch {
-    try { setText('public-ip', (await (await fetch('https://checkip.amazonaws.com', { cache: 'no-store' })).text()).trim() || '—'); } catch { /* non-blocking */ }
-  }
+    setText('colo', trace.colo || '—'); setText('location', trace.loc || '—');
+  } catch { /* non-blocking */ }
+}
+
+async function detectDeviceIps() {
+  if (!window.RTCPeerConnection) return [];
+  let connection;
+  try { connection = new RTCPeerConnection({ iceServers: [] }); }
+  catch { return []; }
+  const addresses = new Set();
+  const collect = (candidate) => {
+    if (!candidate) return;
+    const text = candidate.candidate || '';
+    const type = candidate.type || /\btyp\s+(\w+)/.exec(text)?.[1];
+    const address = candidate.address || text.split(/\s+/)[4];
+    if (type === 'host' && isUsableIpAddress(address)) addresses.add(address);
+  };
+  try {
+    connection.createDataChannel('device-ip');
+    connection.addEventListener('icecandidate', (event) => collect(event.candidate));
+    const offer = await connection.createOffer();
+    await connection.setLocalDescription(offer);
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, 1500);
+      connection.addEventListener('icegatheringstatechange', () => {
+        if (connection.iceGatheringState === 'complete') { clearTimeout(timer); resolve(); }
+      });
+    });
+    connection.localDescription?.sdp.split('\n').filter((line) => line.includes('candidate:')).forEach((line) => collect({ candidate: line }));
+  } catch { /* Browser privacy settings may suppress host candidates. */ }
+  finally { connection.close(); }
+  return [...addresses].sort((a, b) => Number(isPrivateIpv4(b)) - Number(isPrivateIpv4(a)) || a.localeCompare(b));
+}
+
+function isUsableIpAddress(value) {
+  if (!value || value.endsWith('.local')) return false;
+  if (value.includes(':')) return value !== '::' && value !== '::1';
+  const parts = value.split('.').map(Number);
+  return parts.length === 4 && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)
+    && value !== '0.0.0.0' && !value.startsWith('127.');
+}
+
+function isPrivateIpv4(value) {
+  const parts = value.split('.').map(Number);
+  return parts.length === 4 && (parts[0] === 10 || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 192 && parts[1] === 168));
 }
 
 function setOnline(online, log = true) {
@@ -710,7 +759,7 @@ function buildReport() {
   const stats = calculateStats(state.samples, settings.percentileN, state.buffer);
   const rating = calculateRating(stats, state.sent, settings.percentileN);
   const speed = getSpeedMetrics();
-  return { timestamp: new Date().toISOString(), version: VERSION, clientInfo: { os: $('#client-os').textContent, browser: $('#client-browser').textContent, ip: $('#public-ip').textContent, colo: $('#colo').textContent, loc: $('#location').textContent, timezone: $('#timezone').textContent }, settings: { ...settings }, stats: { ...stats, grade: state.rating.current || rating.grade, score: rating.score, gradeLabel: state.rating.current || rating.grade || 'unavailable', downloadMbps: speed.megabitsPerSecond, downloadMBps: speed.megabytesPerSecond, downloadedBytes: speed.bytes, speedDurationSeconds: speed.seconds }, samples: state.samples.map((sample) => ({ ...sample, timestamp: new Date(sample.timestamp).toISOString() })) };
+  return { timestamp: new Date().toISOString(), version: VERSION, clientInfo: { os: $('#client-os').textContent, browser: $('#client-browser').textContent, deviceIp: $('#device-ip').textContent, colo: $('#colo').textContent, loc: $('#location').textContent, timezone: $('#timezone').textContent }, settings: { ...settings }, stats: { ...stats, grade: state.rating.current || rating.grade, score: rating.score, gradeLabel: state.rating.current || rating.grade || 'unavailable', downloadMbps: speed.megabitsPerSecond, downloadMBps: speed.megabytesPerSecond, downloadedBytes: speed.bytes, speedDurationSeconds: speed.seconds }, samples: state.samples.map((sample) => ({ ...sample, timestamp: new Date(sample.timestamp).toISOString() })) };
 }
 
 function showTextReport() {
@@ -776,7 +825,7 @@ function buildTextReport() {
     `作業系統：${report.clientInfo.os}`,
     `瀏覽器：${report.clientInfo.browser}`,
     `時區：${report.clientInfo.timezone}`,
-    `Public IP：${report.clientInfo.ip}`,
+    `設備 IP：${report.clientInfo.deviceIp}`,
     `CDN Node / Colo：${report.clientInfo.colo}`,
     `Location：${report.clientInfo.loc}`,
     `Active Endpoint：${state.endpointKey === 'endpoint' ? 'Primary' : 'Fallback'} (${hostOf(settings[state.endpointKey])})`,
@@ -809,7 +858,7 @@ function buildTextReport() {
     '',
     '[CLIENT / NETWORK]',
     `OS: ${report.clientInfo.os}`, `Browser: ${report.clientInfo.browser}`, `Timezone: ${report.clientInfo.timezone}`,
-    `Public IP: ${report.clientInfo.ip}`, `CDN Node / Colo: ${report.clientInfo.colo}`, `Location: ${report.clientInfo.loc}`,
+    `Device IP: ${report.clientInfo.deviceIp}`, `CDN Node / Colo: ${report.clientInfo.colo}`, `Location: ${report.clientInfo.loc}`,
     `Active Endpoint: ${state.endpointKey === 'endpoint' ? 'Primary' : 'Fallback'} (${hostOf(settings[state.endpointKey])})`,
     '',
     'Note: This tool measures browser HTTPS probe latency. Failure/timeout rate is not ICMP packet loss. The speed test uses browser HTTPS download traffic and does not measure upload speed.',

@@ -1,6 +1,6 @@
 # NetPulse 專案交接手冊
 
-> 此副本為 **NetPulse Consumer Edition**。核心監測邏輯與 Engineering Edition 相同，並保留完整的 OS、Browser、時間、時區、Public IP、Colo、Location 與 Active Endpoint 資訊列。一般畫面使用縮小圖表與白話重點摘要，僅隱藏進階統計、Bufferbloat、設定及 Event Log；使用者可透過頁首「進階資訊」切換完整畫面。
+> 此副本為 **NetPulse Consumer Edition**。核心監測邏輯與 Engineering Edition 相同，並保留完整的 OS、Browser、時間、時區、設備 IP、Colo、Location 與 Active Endpoint 資訊列。一般畫面使用縮小圖表與白話重點摘要，僅隱藏進階統計、Bufferbloat、設定及 Event Log；使用者可透過頁首「進階資訊」切換完整畫面。
 
 Consumer 預設流程為 3 分鐘快速診斷。一般模式按下 Start 時會將本次 Auto Stop 固定為 3 分鐘；前 2 分 30 秒建立一般品質與 Idle baseline，最後 30 秒自動啟動下載測速及 Under-load 探測。完成後自動開啟 IT 文字摘要，並列出下載 Mbps、下載量、實際測速秒數與 Bufferbloat。摘要只在瀏覽器記憶體中產生，使用者必須自行複製或下載 TXT，不會自動傳送。
 
@@ -278,6 +278,8 @@ Endpoint、Fallback、Download URL、Stress 與 Webhook 不接受 Query String �
 
 本次 UI 回歸另以 Chrome 驗證 1920 × 768 與 1366 × 650：一般模式均為白色背景、主要區塊左右邊界一致，1366 × 650 可在首屏完整顯示而不需捲動。
 
+設備 IP 調整後另以 Edge 152、1366 × 650 驗證：欄位與報告已移除 Public IP；瀏覽器未揭露 WebRTC host candidate 時正確顯示「瀏覽器未提供」。核心測試維持 `PASS 10/10`。
+
 ### 8.2 已完成的瀏覽器 Smoke Test
 
 - Edge 桌機版初始載入。
@@ -348,7 +350,8 @@ export const VERSION = '1.0.1';
 
 - Browser `no-cors` Probe 只能觀察請求是否完成或被瀏覽器拒絕，無法提供 ICMP 或封包層資訊。
 - 不同瀏覽器、CORS、DNS、VPN、代理伺服器及省電策略可能影響結果。
-- Public IP／Colo／Location 仰賴 Cloudflare trace；失敗時只有 Public IP 嘗試使用 AWS fallback。
+- 設備 IP 使用無 STUN 伺服器的 WebRTC host candidate 進行本機偵測，不會以出口 IP 代替。Chrome 等瀏覽器可能基於隱私政策隱藏本機位址，此時顯示「瀏覽器未提供」。
+- Colo／Location 仰賴 Cloudflare trace；失敗時顯示 `—`，不影響主要檢測流程。
 - Webhook 服務必須允許來源站的 CORS，否則瀏覽器會阻擋回應。
 - PNG 不依賴第三方腳本；完整頁面擷取失敗時會輸出本地摘要 PNG。
 - Event Log 目前主要使用英文事件字串；若要求完整中英文即時切換，應將事件改為 event key，render 時再查 i18n 字典。
