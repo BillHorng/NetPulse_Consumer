@@ -1,0 +1,14 @@
+{
+  "name": "netpulse-consumer",
+  "version": "1.0.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "http-server": "^14.1.1"
+  }
+}

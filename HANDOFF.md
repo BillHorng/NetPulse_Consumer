@@ -13,10 +13,10 @@ Consumer 預設流程為 3 分鐘快速診斷。一般模式按下 Start 時會�
 | 項目 | 內容 |
 | --- | --- |
 | 專案名稱 | NetPulse｜網路品質監測平台 |
-| 目前版本 | v1.0.1 |
+| 目前版本 | v1.0.2 |
 | 應用類型 | 無後端、可靜態部署的瀏覽器應用程式 |
 | 主要語言 | HTML、CSS、原生 JavaScript ES Modules |
-| 套件建置 | 無 npm、無 bundler、無編譯步驟 |
+| 套件建置 | 正式頁面無建置步驟；npm／Playwright 僅供開發測試 |
 | 規格基準 | `Web Application/LagCheck_v1.0.13_System_Rebuild_Spec.docx` |
 | UI 基準 | `Web Application/UI 參考.png` |
 | GitHub Repository | `https://github.com/BillHorng/NetPulse_Consumer` |
@@ -44,20 +44,53 @@ NetPulse 透過瀏覽器的 HTTPS `fetch` 請求測量應用層延遲，並根�
 - 瀏覽器不提供 host candidate 時，畫面與報告顯示「瀏覽器未提供」／`Not exposed by browser`；這是有效狀態，不應判定為檢測失敗。
 - Cloudflare trace 目前只使用 `colo` 與 `loc`，即使回應含有 `ip`，程式也不顯示或寫入報告。
 
+### 2.2 如何準確取得設備 IP
+
+瀏覽器靜態頁面無法保證取得設備 IP。瀏覽器可能將 WebRTC host candidate 改寫為 mDNS `.local`，或完全不揭露本機位址；因此目前的 `detectDeviceIps()` 只能作為最佳努力偵測，不能視為準確資料來源。
+
+實作前必須先定義需要的是哪一種 IP：
+
+- **本次檢測實際使用的來源 IP**：最適合網路障礙排查。建議在公司內網部署 HTTPS 診斷端點，由端點回傳 TCP 連線看到的來源位址。端點與設備之間若經過 NAT、VPN、Proxy 或負載平衡器，取得的會是該網路節點轉換後的位址。
+- **設備所有網卡及介面 IP**：必須使用受管理的本機代理程式、桌面程式或 Native Messaging，透過作業系統網路介面 API 讀取，再標示介面名稱、IPv4／IPv6、介面狀態及預設路由。純 GitHub Pages 無法提供這項能力。
+- **IT 資產系統登記的設備 IP**：可由 MDM、EDR、資產管理或企業 API 提供，但它可能不是使用者開始檢測當下的實際來源 IP，必須附上資料時間。
+
+NetPulse 的建議方案是增加企業內網 `client-ip` HTTPS API，回傳最小資料：
+
+```json
+{
+  "ip": "192.168.10.25",
+  "observedAt": "2026-09-10T16:30:00+08:00"
+}
+```
+
+安全與部署要求：
+
+- API 必須由公司管理、使用 HTTPS、限制 CORS 為 NetPulse 正式來源，並停用快取。
+- 若前方有 Reverse Proxy，只能信任已知 Proxy 寫入的轉送標頭；不得直接相信任意用戶端送來的 `X-Forwarded-For`。
+- 報告應同時記錄 IP、觀測時間與取得方式，例如 `source: "intranet-api"`，避免 IT 將歷史或轉換後的 IP 誤認為設備網卡位址。
+- 不應使用公共 STUN、第三方 IP API 或 Cloudflare `trace.ip` 冒充設備 IP；這些通常取得的是 NAT／VPN／Proxy 出口位址。
+- API 無法連線時保留「瀏覽器未提供」，不得回退成 Public IP。
+
+若要求「每次都取得設備所有網卡的準確 IP」，正式需求應改為部署受管理的本機代理程式；若只要求「本次檢測封包實際採用的內網來源 IP」，優先採用同網路路徑上的企業內網 HTTPS API。
+
 ## 3. 目錄與檔案
 
 ```text
-NetPulse/
-├─ index.html          # UI 結構與第三方截圖工具載入
-├─ styles.css          # 視覺樣式、深色模式、響應式版面
-├─ app.mjs             # 應用狀態、Probe、Stress、圖表、匯出及 DOM 控制
-├─ core.mjs            # 可獨立測試的設定、統計及評分純函數
-├─ tests.html          # 不需測試框架的瀏覽器測試頁
-├─ README.md           # 使用者／部署者快速說明
-├─ HANDOFF.md          # 本交接手冊
-└─ Web Application/
-   ├─ LagCheck_v1.0.13_System_Rebuild_Spec.docx
-   └─ UI 參考.png
+NetPulse_Consumer/
+├─ index.html                 # UI 結構
+├─ styles.css                 # 視覺樣式、深色模式、響應式版面
+├─ app.mjs                    # 應用狀態、Probe、Stress、圖表及 DOM 協調
+├─ core.mjs                   # 設定、統計及評分純函數
+├─ device-info.mjs            # OS、Browser、設備 IP 與 CDN metadata
+├─ speed-test.mjs             # 測速常數、暖機排除與分段中位數
+├─ report.mjs                 # 報告編號與中英文 IT 文字報告
+├─ tests.html                 # 不需測試框架的瀏覽器單元測試
+├─ e2e/netpulse.spec.mjs      # Playwright 完整流程測試
+├─ playwright.config.mjs      # E2E 與本機靜態伺服器設定
+├─ package.json               # 開發測試依賴；正式頁面不使用
+├─ .github/workflows/ci.yml   # push／PR 自動測試
+├─ README.md                  # 使用者／部署者快速說明
+└─ HANDOFF.md                 # 本交接手冊
 ```
 
 主要責任分工：
@@ -65,10 +98,14 @@ NetPulse/
 | 檔案 | 維護原則 |
 | --- | --- |
 | `core.mjs` | 僅放無 DOM 相依的純函數；修改演算法時應同步新增測試 |
-| `app.mjs` | 負責瀏覽器 API、狀態、事件、生命週期與畫面更新 |
+| `app.mjs` | 負責狀態、Probe、下載 workers、事件、生命週期與畫面協調 |
+| `device-info.mjs` | 裝置／瀏覽器資訊與 CDN metadata；設備 IP 行為暫不擴充 |
+| `speed-test.mjs` | 測速計算必須保持純函數並由 `tests.html` 覆蓋 |
+| `report.mjs` | 組合中英文文字報告，不直接讀取 DOM |
 | `index.html` | 維持語義化標記、無障礙 label 與固定 DOM ID |
 | `styles.css` | 顏色使用 CSS variables；響應式斷點目前為 1360、980、680 px |
-| `tests.html` | 核心與安全邊界回歸測試；結果應顯示 `PASS 10/10` 或更新後的完整通過數 |
+| `tests.html` | 核心與安全邊界回歸測試；目前應顯示 `PASS 13/13` |
+| `e2e/` | 驗證 1366 × 650 首屏、縮時完整流程、IT 報告及 Public IP 不回歸 |
 
 ## 4. 本機啟動
 
@@ -193,17 +230,20 @@ Grade：
 - 至少需要 5 筆 Idle、3 筆 Under-load 才會產生 Buffer delta。
 - `Buffer delta = Under-load average - Idle average`。
 - 一般畫面與文字報告以 Mbps 呈現，進階 Buffer 面板另顯示 MB/s。
+- 兩個 workers 的 bytes 會合併到一秒時間桶；前 2 秒視為 TCP／TLS 暖機，不納入統計。
+- 暖機後只採用完整的一秒時間桶，並以各桶總 Mbps 中位數作為主要結果；有效時間桶不足時才回退為「總下載量 ÷ 總時間」。
 - 此功能只測量瀏覽器 HTTPS 下載速度，不包含上傳速度；結果也會受測速端點、瀏覽器、VPN／Proxy 與裝置效能影響。
 
-一般模式的階段控制常數與主要函數均位於 `app.mjs`：
+一般模式的階段控制與下載 worker 位於 `app.mjs`，測速常數與純計算位於 `speed-test.mjs`：
 
 - `QUICK_TEST_MS`：完整診斷時間，目前為 180 秒。
 - `SPEED_PHASE_MS`：下載測速階段，目前為最後 30 秒。
 - `checkSpeedPhase()`：依 elapsed time 啟動測速；一般模式會以 force 方式啟動，即使 Idle 成功樣本不足仍會嘗試下載。
-- `getSpeedMetrics()`：依下載 bytes 與實際經過秒數計算 MB/s 及 Mbps。
+- `calculateSpeedMetrics()`：排除暖機分段、計算分段中位數與 aggregate fallback。
+- `getSpeedMetrics()`：整理目前 state 後呼叫純計算模組。
 - `renderSpeedSummary()`：更新一般模式第五張「下載速度」摘要卡。
 
-`buildReport()` 會在 JSON `stats` 加入 `downloadMbps`、`downloadMBps`、`downloadedBytes` 與 `speedDurationSeconds`。`buildTextReport()` 會把同一組數據加入中英文 IT 文字報告；報告必須持續註明這是 HTTPS download-only 測試。
+`buildReport()` 會在 JSON `stats` 加入 `downloadMbps`、`downloadMBps`、`downloadAggregateMbps`、`downloadedBytes`、`speedDurationSeconds`、`speedSegmentCount`、`speedMethod` 與 `speedWarmupSeconds`，另以 `speedTest` 記錄下載端點、flow 數與流量上限。`report.mjs` 會把測速方法、有效分段數與下載端點加入中英文 IT 報告；報告必須持續註明這是 HTTPS download-only 測試。
 
 ### 5.7 圖表
 
@@ -283,12 +323,17 @@ Endpoint、Fallback、Download URL、Stress 與 Webhook 不接受 Query String �
 - Rating 解鎖及 Loss bottleneck cap
 - HTTPS-only URL 驗證、automation 目的地封鎖、clamp、autostart 及 multiple export parsing
 - 最後 30 秒測速階段的 02:30／03:00 邊界
+- OS／Browser 與 WebRTC candidate 純解析
+- 測速暖機排除、分段中位數及 aggregate fallback
+- 固定時間輸入的報告編號
 
-交接時的執行結果為：`PASS 10/10`。
+目前執行結果為：`PASS 13/13`。
 
 本次 UI 回歸另以 Chrome 驗證 1920 × 768 與 1366 × 650：一般模式均為白色背景、主要區塊左右邊界一致，1366 × 650 可在首屏完整顯示而不需捲動。
 
-設備 IP 調整後另以 Edge 152、1366 × 650 驗證：欄位與報告已移除 Public IP；瀏覽器未揭露 WebRTC host candidate 時正確顯示「瀏覽器未提供」。核心測試維持 `PASS 10/10`。
+設備 IP 調整後另以 Edge 152、1366 × 650 驗證：欄位與報告已移除 Public IP；瀏覽器未揭露 WebRTC host candidate 時正確顯示「瀏覽器未提供」。模組化後 Edge 152 可正常載入主畫面，執行後 DOM 無 SyntaxError／ReferenceError。
+
+Playwright `e2e/netpulse.spec.mjs` 另驗證：`tests.html` 全數通過、1366 × 650 首屏無捲動、縮時完整診斷自動完成、IT 報告包含設備 IP／測速方法／下載端點，且不含 Public IP。縮時常數只由 `page.addInitScript()` 注入 `globalThis.__NETPULSE_TEST_CONFIG__`，不接受 URL 參數，也不改變正式三分鐘常數。
 
 ### 8.2 已完成的瀏覽器 Smoke Test
 
@@ -319,7 +364,7 @@ Endpoint、Fallback、Download URL、Stress 與 Webhook 不接受 Query String �
 
 ## 9. 部署
 
-整個 `NetPulse` 主目錄可直接部署到 GitHub Pages、Nginx、Apache、Cloudflare Pages 或其他靜態 Hosting。
+整個 `NetPulse_Consumer` 儲存庫可直接部署到 GitHub Pages、Nginx、Apache、Cloudflare Pages 或其他靜態 Hosting。
 
 部署時至少包含：
 
@@ -328,6 +373,9 @@ index.html
 styles.css
 app.mjs
 core.mjs
+device-info.mjs
+speed-test.mjs
+report.mjs
 ```
 
 建議一併部署 `README.md` 與 `tests.html`，但若不希望正式站暴露測試頁，可以在部署流程排除 `tests.html`。
@@ -345,16 +393,17 @@ core.mjs
 
 ```js
 // core.mjs
-export const VERSION = '1.0.1';
+export const VERSION = '1.0.2';
 ```
 
 頁首、JSON 報告及 PNG 報告都會讀取此常數。發版時：
 
 1. 更新 `core.mjs` 的 `VERSION`。
-2. 執行 `tests.html`。
-3. 完成第 8.3 節 Smoke Test。
-4. 檢查 README 與本手冊是否需要同步。
-5. 保存測試結果與版本差異紀錄。
+2. 執行 `tests.html`，確認 `PASS 13/13`。
+3. 在有 Node.js 的環境執行 `npm ci` 與 `npm test`。
+4. 完成第 8.3 節 Smoke Test。
+5. 檢查 README 與本手冊是否需要同步。
+6. 以 `git diff --check` 檢查後提交並推送；GitHub Actions 必須通過。
 
 ### 10.1 2026-09-10 部署紀錄
 
@@ -362,6 +411,17 @@ export const VERSION = '1.0.1';
 - 遠端分支：`main`。
 - Pages 驗證：首頁、`app.mjs` 與設備 IP 欄位均已更新。
 - 回歸結果：核心測試 `PASS 10/10`；Edge 152、1366 × 650 載入與首屏版面正常。
+
+### 10.2 2026-09-11 改善紀錄
+
+- 發布版本：`v1.0.2`。
+- 本機 `NetPulse_Consumer` 已直接初始化為獨立 Git 工作目錄，`main` 追蹤 `origin/main`；後續不再以暫存 clone 搬運檔案。
+- `device-info.mjs`、`speed-test.mjs`、`report.mjs` 已從 `app.mjs` 拆出；設備 IP 的產品行為沒有擴充或改變。
+- 測速排除前 2 秒暖機，合併兩條 flow 至一秒時間桶並取完整時間桶的 Mbps 中位數；不足時回退 aggregate，報告記錄方法、區段數與端點。
+- 瀏覽器單元測試：`PASS 13/13`。
+- Node 24 LTS 語法檢查：`app.mjs`、三個新模組及 Playwright spec 全數通過。
+- Playwright E2E：`2 passed`，包含瀏覽器測試頁與縮時完整 Consumer 流程。
+- `.github/workflows/ci.yml` 會在 `main` push／pull request 使用 `npm ci` 與 Chromium 執行測試。
 
 ## 11. 已知限制與風險
 
@@ -372,20 +432,19 @@ export const VERSION = '1.0.1';
 - Webhook 服務必須允許來源站的 CORS，否則瀏覽器會阻擋回應。
 - PNG 不依賴第三方腳本；完整頁面擷取失敗時會輸出本地摘要 PNG。
 - Event Log 目前主要使用英文事件字串；若要求完整中英文即時切換，應將事件改為 event key，render 時再查 i18n 字典。
-- 現有 `tests.html` 著重純函數，尚未使用 Playwright／WebDriver 建立完整 E2E 測試。
-- 尚未建立 CI、正式部署設定、瀏覽器相容性矩陣及 UAT 紀錄。
+- Playwright 已覆蓋主要 Consumer happy path，但 Failover、Webhook、各匯出格式及 Stress 100 MB 邊界仍需擴充。
+- GitHub Actions 已建立；尚未完成 iOS／Android 實機相容性矩陣及正式 UAT 紀錄。
 
 ## 12. 建議後續工作
 
 依優先順序建議：
 
 1. 將 Event Log 改為 i18n event key，完成 Log 的中英文同步。
-2. 將 `app.mjs` 拆分為 probe、stress、chart、export、i18n、clientInfo 模組。
-3. 建立 Playwright E2E，覆蓋 Start、Pause、Reset、Failover、Auto Stop 與 Export。
-4. 加入可控的本機測試 endpoints，以可靠模擬 timeout、failed 和 slow response。
-5. 建立 GitHub Actions 或其他 CI，執行靜態檢查與瀏覽器測試。
-6. 完成 iOS Safari 與 Android Chrome 實機 smoke test。
-7. 建立正式站 CSP、隱私聲明與版本變更紀錄。
+2. 繼續將 `app.mjs` 的 probe、chart、export 與 i18n 拆為獨立模組。
+3. 擴充 Playwright E2E，覆蓋 Pause、Reset、Failover、Webhook、Auto Stop、Export 與 100 MB 邊界。
+4. 加入可控的測試 endpoints，以可靠模擬 timeout、failed 和 slow response。
+5. 完成 iOS Safari 與 Android Chrome 實機 smoke test。
+6. 建立正式站 CSP header、隱私聲明與 UAT 紀錄。
 
 ## 13. 常見問題排查
 

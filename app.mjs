@@ -2,6 +2,9 @@ import {
   VERSION, STORAGE_KEY, DEFAULT_SETTINGS, LIMITS, validateSettings, parseAutomation,
   isSpike, ewma, calculateStats, calculateRating, formatMs, formatPercent, isFinalPhase,
 } from './core.mjs';
+import { detectOperatingSystem, detectBrowser, detectDeviceIps, fetchCdnMetadata } from './device-info.mjs';
+import { DEFAULT_QUICK_TEST_MS, DEFAULT_SPEED_PHASE_MS, SPEED_FLOW_COUNT, SPEED_WARMUP_MS, calculateSpeedMetrics } from './speed-test.mjs';
+import { buildDiagnosticText, createReportId } from './report.mjs';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -45,8 +48,9 @@ const copy = {
   },
 };
 
-const QUICK_TEST_MS = 3 * 60 * 1000;
-const SPEED_PHASE_MS = 30 * 1000;
+const testConfig = globalThis.__NETPULSE_TEST_CONFIG__ || {};
+const QUICK_TEST_MS = Number.isFinite(testConfig.quickTestMs) ? testConfig.quickTestMs : DEFAULT_QUICK_TEST_MS;
+const SPEED_PHASE_MS = Number.isFinite(testConfig.speedPhaseMs) ? testConfig.speedPhaseMs : DEFAULT_SPEED_PHASE_MS;
 
 const automation = parseAutomation(location.search, loadStoredSettings());
 let settings = automation.settings;
@@ -54,7 +58,7 @@ const state = {
   running: false, paused: false, samples: [], logs: [], sent: 0, consecutiveFailures: 0,
   endpointKey: 'endpoint', abortController: null, probeTimer: null, countdownTimer: null,
   startedAt: null, elapsedBeforePause: 0, nextProbeAt: null, ewmaJitter: null, jitterDiffs: [], previousLatency: null,
-  stressControllers: [], stressBytes: 0, stressStartedAt: null, stressElapsedMs: 0, stressActive: false, stressCompleted: false, activeStressWorkers: 0,
+  stressControllers: [], stressBytes: 0, stressStartedAt: null, stressElapsedMs: 0, stressActive: false, stressCompleted: false, activeStressWorkers: 0, speedBuckets: [],
   buffer: { idle: [], load: [], idleAvg: null, loadAvg: null, delta: null },
   rating: { current: null, pending: null, count: 0 }, targetCompleted: false,
   diagnosticComplete: false, diagnosticStartedAt: null, diagnosticEndedAt: null, reportId: null,
@@ -268,7 +272,7 @@ function resetMonitoring() {
   state.samples = []; state.logs = []; state.sent = 0; state.consecutiveFailures = 0;
   state.endpointKey = 'endpoint'; state.elapsedBeforePause = 0; state.startedAt = null;
   state.ewmaJitter = null; state.jitterDiffs = []; state.previousLatency = null; state.targetCompleted = false; state.stressCompleted = false;
-  state.stressBytes = 0; state.stressStartedAt = null; state.stressElapsedMs = 0; state.activeStressWorkers = 0;
+  state.stressBytes = 0; state.stressStartedAt = null; state.stressElapsedMs = 0; state.activeStressWorkers = 0; state.speedBuckets = [];
   state.buffer = { idle: [], load: [], idleAvg: null, loadAvg: null, delta: null };
   state.rating = { current: null, pending: null, count: 0 }; state.diagnosticComplete = false; state.diagnosticStartedAt = null; state.diagnosticEndedAt = null; state.reportId = null;
   state.quickDiagnostic = false; state.speedPhaseStarted = false;
@@ -386,9 +390,9 @@ function updateBuffer(sample) {
 function startStress(force = false) {
   if (state.stressActive || state.stressCompleted || !state.running) return;
   if (!force && state.buffer.idle.length < 5) return;
-  state.stressActive = true; state.stressBytes = 0; state.stressStartedAt = performance.now(); state.stressElapsedMs = 0; state.activeStressWorkers = 0;
-  addLog('Stress Started (2 flows)', 'info');
-  for (let i = 0; i < 2; i += 1) stressWorker(i);
+  state.stressActive = true; state.stressBytes = 0; state.stressStartedAt = performance.now(); state.stressElapsedMs = 0; state.activeStressWorkers = 0; state.speedBuckets = [];
+  addLog(`Stress Started (${SPEED_FLOW_COUNT} flows)`, 'info');
+  for (let i = 0; i < SPEED_FLOW_COUNT; i += 1) stressWorker(i);
 }
 
 async function stressWorker(workerId) {
@@ -398,19 +402,20 @@ async function stressWorker(workerId) {
       const controller = new AbortController();
       state.stressControllers.push(controller);
       try {
-      const response = await fetch(cacheBust(settings.downloadUrl), { cache: 'no-store', credentials: 'omit', signal: controller.signal });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      if (response.body) {
-        const reader = response.body.getReader();
-        while (state.stressActive) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          state.stressBytes += value.byteLength;
-          if (state.stressBytes >= LIMITS.stressBytes) { controller.abort(); break; }
+        const response = await fetch(cacheBust(settings.downloadUrl), { cache: 'no-store', credentials: 'omit', signal: controller.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (response.body) {
+          const reader = response.body.getReader();
+          while (state.stressActive) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            recordDownloadedBytes(value.byteLength);
+            if (state.stressBytes >= LIMITS.stressBytes) { controller.abort(); break; }
+          }
+        } else {
+          const bytes = (await response.arrayBuffer()).byteLength;
+          recordDownloadedBytes(bytes);
         }
-      } else {
-        state.stressBytes += (await response.arrayBuffer()).byteLength;
-      }
       } catch (error) {
         if (state.stressActive && error?.name !== 'AbortError') {
           addLog(`Stress Error (flow ${workerId + 1}: ${error.message})`, 'error');
@@ -426,6 +431,15 @@ async function stressWorker(workerId) {
     renderBuffer();
   }
   if (state.stressActive && state.stressBytes >= LIMITS.stressBytes) stopStress('Stress Limit Reached');
+}
+
+function recordDownloadedBytes(bytes) {
+  state.stressBytes += bytes;
+  if (!state.stressStartedAt) return;
+  const measuredOffsetMs = performance.now() - state.stressStartedAt - SPEED_WARMUP_MS;
+  if (measuredOffsetMs < 0) return;
+  const bucketIndex = Math.floor(measuredOffsetMs / 1000);
+  state.speedBuckets[bucketIndex] = (state.speedBuckets[bucketIndex] || 0) + bytes;
 }
 
 function stopStress(reason) {
@@ -542,9 +556,7 @@ function renderHighlights(stats, rating) {
 
 function getSpeedMetrics() {
   const elapsedMs = state.stressActive && state.stressStartedAt ? performance.now() - state.stressStartedAt : state.stressElapsedMs;
-  const seconds = elapsedMs ? Math.max(.001, elapsedMs / 1000) : 0;
-  const megabytesPerSecond = seconds ? state.stressBytes / seconds / 1_000_000 : null;
-  return { bytes: state.stressBytes, seconds, megabytesPerSecond, megabitsPerSecond: megabytesPerSecond === null ? null : megabytesPerSecond * 8 };
+  return calculateSpeedMetrics({ totalBytes: state.stressBytes, elapsedMs, buckets: state.speedBuckets });
 }
 
 function renderSpeedSummary() {
@@ -688,9 +700,8 @@ function drawChart() {
 
 async function detectClient() {
   const ua = navigator.userAgent;
-  setText('client-os', /Windows NT 10/.test(ua) ? 'Windows 10/11' : /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS / iPadOS' : /Mac OS X/.test(ua) ? 'macOS' : /Linux/.test(ua) ? 'Linux' : 'Unknown');
-  const browser = /Edg\/(\d+)/.exec(ua)?.[1] ? `Edge ${/Edg\/(\d+)/.exec(ua)[1]}` : /Chrome\/(\d+)/.exec(ua)?.[1] ? `Chrome ${/Chrome\/(\d+)/.exec(ua)[1]}` : /Version\/(\d+).*Safari/.exec(ua)?.[1] ? `Safari ${/Version\/(\d+).*Safari/.exec(ua)[1]}` : 'Browser';
-  setText('client-browser', browser);
+  setText('client-os', detectOperatingSystem(ua));
+  setText('client-browser', detectBrowser(ua));
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const offset = -new Date().getTimezoneOffset();
   setText('timezone', `${zone} (UTC${offset >= 0 ? '+' : ''}${offset / 60})`); renderClock();
@@ -700,54 +711,8 @@ async function detectClient() {
   deviceIpNode.dataset.unavailable = String(!deviceIps.length);
   setText('device-ip', deviceIp);
   deviceIpNode.title = deviceIp;
-  try {
-    const response = await fetch('https://www.cloudflare.com/cdn-cgi/trace', { cache: 'no-store' });
-    const trace = Object.fromEntries((await response.text()).trim().split('\n').map((line) => line.split('=')));
-    setText('colo', trace.colo || '—'); setText('location', trace.loc || '—');
-  } catch { /* non-blocking */ }
-}
-
-async function detectDeviceIps() {
-  if (!window.RTCPeerConnection) return [];
-  let connection;
-  try { connection = new RTCPeerConnection({ iceServers: [] }); }
-  catch { return []; }
-  const addresses = new Set();
-  const collect = (candidate) => {
-    if (!candidate) return;
-    const text = candidate.candidate || '';
-    const type = candidate.type || /\btyp\s+(\w+)/.exec(text)?.[1];
-    const address = candidate.address || text.split(/\s+/)[4];
-    if (type === 'host' && isUsableIpAddress(address)) addresses.add(address);
-  };
-  try {
-    connection.createDataChannel('device-ip');
-    connection.addEventListener('icecandidate', (event) => collect(event.candidate));
-    const offer = await connection.createOffer();
-    await connection.setLocalDescription(offer);
-    await new Promise((resolve) => {
-      const timer = setTimeout(resolve, 1500);
-      connection.addEventListener('icegatheringstatechange', () => {
-        if (connection.iceGatheringState === 'complete') { clearTimeout(timer); resolve(); }
-      });
-    });
-    connection.localDescription?.sdp.split('\n').filter((line) => line.includes('candidate:')).forEach((line) => collect({ candidate: line }));
-  } catch { /* Browser privacy settings may suppress host candidates. */ }
-  finally { connection.close(); }
-  return [...addresses].sort((a, b) => Number(isPrivateIpv4(b)) - Number(isPrivateIpv4(a)) || a.localeCompare(b));
-}
-
-function isUsableIpAddress(value) {
-  if (!value || value.endsWith('.local')) return false;
-  if (value.includes(':')) return value !== '::' && value !== '::1';
-  const parts = value.split('.').map(Number);
-  return parts.length === 4 && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)
-    && value !== '0.0.0.0' && !value.startsWith('127.');
-}
-
-function isPrivateIpv4(value) {
-  const parts = value.split('.').map(Number);
-  return parts.length === 4 && (parts[0] === 10 || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 192 && parts[1] === 168));
+  const metadata = await fetchCdnMetadata();
+  setText('colo', metadata.colo); setText('location', metadata.location);
 }
 
 function setOnline(online, log = true) {
@@ -759,7 +724,25 @@ function buildReport() {
   const stats = calculateStats(state.samples, settings.percentileN, state.buffer);
   const rating = calculateRating(stats, state.sent, settings.percentileN);
   const speed = getSpeedMetrics();
-  return { timestamp: new Date().toISOString(), version: VERSION, clientInfo: { os: $('#client-os').textContent, browser: $('#client-browser').textContent, deviceIp: $('#device-ip').textContent, colo: $('#colo').textContent, loc: $('#location').textContent, timezone: $('#timezone').textContent }, settings: { ...settings }, stats: { ...stats, grade: state.rating.current || rating.grade, score: rating.score, gradeLabel: state.rating.current || rating.grade || 'unavailable', downloadMbps: speed.megabitsPerSecond, downloadMBps: speed.megabytesPerSecond, downloadedBytes: speed.bytes, speedDurationSeconds: speed.seconds }, samples: state.samples.map((sample) => ({ ...sample, timestamp: new Date(sample.timestamp).toISOString() })) };
+  return {
+    timestamp: new Date().toISOString(),
+    version: VERSION,
+    clientInfo: {
+      os: $('#client-os').textContent, browser: $('#client-browser').textContent, deviceIp: $('#device-ip').textContent,
+      colo: $('#colo').textContent, loc: $('#location').textContent, timezone: $('#timezone').textContent,
+    },
+    settings: { ...settings },
+    stats: {
+      ...stats, grade: state.rating.current || rating.grade, score: rating.score,
+      gradeLabel: state.rating.current || rating.grade || 'unavailable',
+      downloadMbps: speed.megabitsPerSecond, downloadMBps: speed.megabytesPerSecond,
+      downloadAggregateMbps: speed.aggregateMbps, downloadedBytes: speed.bytes,
+      speedDurationSeconds: speed.seconds, speedSegmentCount: speed.segmentCount,
+      speedMethod: speed.method, speedWarmupSeconds: speed.warmupSeconds,
+    },
+    speedTest: { endpoint: settings.downloadUrl, flows: SPEED_FLOW_COUNT, maxBytes: LIMITS.stressBytes },
+    samples: state.samples.map((sample) => ({ ...sample, timestamp: new Date(sample.timestamp).toISOString() })),
+  };
 }
 
 function showTextReport() {
@@ -778,92 +761,39 @@ function buildTextReport() {
   const report = buildReport();
   const stats = report.stats;
   const zh = settings.lang === 'zh';
-  const symptom = $('#incident-type').selectedOptions[0]?.textContent || '—';
-  const note = $('#incident-note').value.trim() || (zh ? '未填寫' : 'Not provided');
-  const startTime = new Date(state.diagnosticStartedAt || Date.now() - getElapsed());
-  const endTime = new Date(state.diagnosticEndedAt || Date.now());
   const statisticsWindow = state.samples.slice(-settings.percentileN);
-  const successful = statisticsWindow.filter((sample) => sample.status === 'ok').length;
-  const failedOnly = statisticsWindow.filter((sample) => sample.status === 'failed').length;
-  const timedOut = statisticsWindow.filter((sample) => sample.status === 'timeout').length;
-  const warmUp = statisticsWindow.filter((sample) => sample.warmUp).length;
-  const locale = zh ? 'zh-TW' : 'en-US';
-  const speedReady = Number.isFinite(stats.downloadMbps) && stats.downloadedBytes > 0;
-  const speedMbps = speedReady ? `${stats.downloadMbps.toFixed(1)} Mbps` : (zh ? '未完成' : 'Incomplete');
-  const speedDetail = speedReady
-    ? `${(stats.downloadedBytes / 1_000_000).toFixed(1)} MB / ${stats.speedDurationSeconds.toFixed(1)} s / ${stats.downloadMBps.toFixed(2)} MB/s`
-    : (zh ? '尚無有效下載資料' : 'No valid download data');
-  const lines = zh ? [
-    'NetPulse 網路檢測重點摘要',
-    `報告編號：${state.reportId}`,
-    `檢測版本：v${VERSION}`,
-    `檢測時間：${startTime.toLocaleString(locale, { hour12: false })} ～ ${endTime.toLocaleString(locale, { hour12: false })}`,
-    `檢測長度：${formatDuration(getElapsed())}`,
-    '',
-    '【使用者回報】',
-    `狀況：${symptom}`,
-    `補充：${note}`,
-    '',
-    '【重點判讀】',
-    `整體品質：${$('#highlight-overall').textContent}`,
-    `連線穩定度：${$('#highlight-stability').textContent}`,
-    `反應速度：${$('#highlight-response').textContent}`,
-    `延遲一致性：${$('#highlight-consistency').textContent}`,
-    `下載速度：${speedMbps}`,
-    '',
-    '【測試數據】',
-    `總探測：${state.sent} 筆；統計視窗：最近 ${stats.total} 筆（成功 ${successful}，含暖機 ${warmUp}／失敗 ${failedOnly}／逾時 ${timedOut}）`,
-    `延遲：目前 ${formatMs(stats.current)}／平均 ${formatMs(stats.mean)}／最低 ${formatMs(stats.min)}／最高 ${formatMs(stats.max)}`,
-    `百分位：P50 ${formatMs(stats.p50)}／P95 ${formatMs(stats.p95)}／P99 ${formatMs(stats.p99)}`,
-    `Jitter：${formatMs(stats.jitter)}／MAD ${formatMs(stats.mad)}`,
-    `失敗率：${formatPercent(stats.failureRate)}／逾時率 ${formatPercent(stats.timeoutRate)}／Wilson 95% ${formatPercent(stats.wilsonFailure)}`,
-    `尖峰：${stats.spikes} 次／最大 ${formatMs(stats.maxSpike)}`,
-    Number.isFinite(stats.bufferDelta) ? `Bufferbloat：${formatMs(stats.bufferDelta)}（Idle ${formatMs(state.buffer.idleAvg)}／負載 ${formatMs(state.buffer.loadAvg)}）` : 'Bufferbloat：本次未執行或資料不足',
-    `下載測速：${speedMbps}（下載量／時間／速率：${speedDetail}）`,
-    '',
-    '【裝置與網路環境】',
-    `作業系統：${report.clientInfo.os}`,
-    `瀏覽器：${report.clientInfo.browser}`,
-    `時區：${report.clientInfo.timezone}`,
-    `設備 IP：${report.clientInfo.deviceIp}`,
-    `CDN Node / Colo：${report.clientInfo.colo}`,
-    `Location：${report.clientInfo.loc}`,
-    `Active Endpoint：${state.endpointKey === 'endpoint' ? 'Primary' : 'Fallback'} (${hostOf(settings[state.endpointKey])})`,
-    '',
-    '註：本工具測量瀏覽器 HTTPS Probe latency；失敗／逾時率不等同 ICMP packet loss。下載測速使用瀏覽器 HTTPS 下載流量，不包含上傳速度。',
-  ] : [
-    'NetPulse Network Diagnostic Summary',
-    `Report ID: ${state.reportId}`,
-    `Version: v${VERSION}`,
-    `Test window: ${startTime.toLocaleString(locale)} – ${endTime.toLocaleString(locale)}`,
-    `Duration: ${formatDuration(getElapsed())}`,
-    '',
-    '[USER REPORT]', `Issue: ${symptom}`, `Note: ${note}`, '',
-    '[KEY FINDINGS]',
-    `Overall quality: ${$('#highlight-overall').textContent}`,
-    `Connection stability: ${$('#highlight-stability').textContent}`,
-    `Responsiveness: ${$('#highlight-response').textContent}`,
-    `Latency consistency: ${$('#highlight-consistency').textContent}`,
-    `Download speed: ${speedMbps}`,
-    '',
-    '[TEST DATA]',
-    `Total probes: ${state.sent}; statistics window: latest ${stats.total} (success ${successful}, including ${warmUp} warm-up / failed ${failedOnly} / timeout ${timedOut})`,
-    `Latency: current ${formatMs(stats.current)} / average ${formatMs(stats.mean)} / min ${formatMs(stats.min)} / max ${formatMs(stats.max)}`,
-    `Percentiles: P50 ${formatMs(stats.p50)} / P95 ${formatMs(stats.p95)} / P99 ${formatMs(stats.p99)}`,
-    `Jitter: ${formatMs(stats.jitter)} / MAD ${formatMs(stats.mad)}`,
-    `Failure: ${formatPercent(stats.failureRate)} / timeout ${formatPercent(stats.timeoutRate)} / Wilson 95% ${formatPercent(stats.wilsonFailure)}`,
-    `Spikes: ${stats.spikes} / maximum ${formatMs(stats.maxSpike)}`,
-    Number.isFinite(stats.bufferDelta) ? `Bufferbloat: ${formatMs(stats.bufferDelta)} (idle ${formatMs(state.buffer.idleAvg)} / loaded ${formatMs(state.buffer.loadAvg)})` : 'Bufferbloat: not run or insufficient data',
-    `Download test: ${speedMbps} (download / duration / rate: ${speedDetail})`,
-    '',
-    '[CLIENT / NETWORK]',
-    `OS: ${report.clientInfo.os}`, `Browser: ${report.clientInfo.browser}`, `Timezone: ${report.clientInfo.timezone}`,
-    `Device IP: ${report.clientInfo.deviceIp}`, `CDN Node / Colo: ${report.clientInfo.colo}`, `Location: ${report.clientInfo.loc}`,
-    `Active Endpoint: ${state.endpointKey === 'endpoint' ? 'Primary' : 'Fallback'} (${hostOf(settings[state.endpointKey])})`,
-    '',
-    'Note: This tool measures browser HTTPS probe latency. Failure/timeout rate is not ICMP packet loss. The speed test uses browser HTTPS download traffic and does not measure upload speed.',
-  ];
-  return lines.join('\n');
+  return buildDiagnosticText({
+    language: settings.lang,
+    reportId: state.reportId,
+    version: VERSION,
+    startTime: new Date(state.diagnosticStartedAt || Date.now() - getElapsed()),
+    endTime: new Date(state.diagnosticEndedAt || Date.now()),
+    duration: formatDuration(getElapsed()),
+    symptom: $('#incident-type').selectedOptions[0]?.textContent || '—',
+    note: $('#incident-note').value.trim() || (zh ? '未填寫' : 'Not provided'),
+    highlights: {
+      overall: $('#highlight-overall').textContent,
+      stability: $('#highlight-stability').textContent,
+      response: $('#highlight-response').textContent,
+      consistency: $('#highlight-consistency').textContent,
+    },
+    stats,
+    counts: {
+      sent: state.sent,
+      successful: statisticsWindow.filter((sample) => sample.status === 'ok').length,
+      failed: statisticsWindow.filter((sample) => sample.status === 'failed').length,
+      timedOut: statisticsWindow.filter((sample) => sample.status === 'timeout').length,
+      warmUp: statisticsWindow.filter((sample) => sample.warmUp).length,
+    },
+    buffer: state.buffer,
+    speed: {
+      bytes: stats.downloadedBytes, seconds: stats.speedDurationSeconds, megabitsPerSecond: stats.downloadMbps,
+      method: stats.speedMethod, segmentCount: stats.speedSegmentCount, warmupSeconds: stats.speedWarmupSeconds,
+    },
+    clientInfo: report.clientInfo,
+    activeEndpoint: `${state.endpointKey === 'endpoint' ? 'Primary' : 'Fallback'} (${hostOf(settings[state.endpointKey])})`,
+    downloadEndpoint: hostOf(settings.downloadUrl),
+  });
 }
 
 async function copyTextReport() {
@@ -881,13 +811,6 @@ async function copyTextReport() {
 
 function downloadTextReport() {
   downloadBlob('\ufeff' + buildTextReport(), `${state.reportId || createReportId()}.txt`, 'text/plain;charset=utf-8');
-}
-
-function createReportId() {
-  const date = new Date();
-  const digits = [date.getFullYear(), date.getMonth() + 1, date.getDate(), date.getHours(), date.getMinutes(), date.getSeconds()]
-    .map((value, index) => index === 0 ? String(value) : String(value).padStart(2, '0')).join('');
-  return `NP-${digits}`;
 }
 
 function exportReport(type) {

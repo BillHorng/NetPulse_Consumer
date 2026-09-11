@@ -14,7 +14,7 @@ NetPulse 是一套可部署於靜態網站的瀏覽器式網路品質監測工�
 
 請透過任一靜態 HTTP Server 開啟此資料夾，不要直接雙擊 `index.html`。正式部署建議使用 HTTPS。
 
-入口為 `index.html`，不需要安裝套件或執行建置。`tests.html` 是核心演算法的瀏覽器測試頁。
+正式執行入口為 `index.html`，不需要安裝套件或執行建置。開發驗證另使用 npm 與 Playwright；`tests.html` 是可直接開啟的核心演算法測試頁。
 
 開發、維護、測試與發版流程請參閱 [`HANDOFF.md`](./HANDOFF.md)。
 
@@ -25,11 +25,23 @@ NetPulse 是一套可部署於靜態網站的瀏覽器式網路品質監測工�
 - A+／A／B／C／F 動態品質評級與 bottleneck cap
 - Primary／Fallback 雙向 failover
 - 設備 IP 最佳努力偵測；只接受 WebRTC host candidate，不使用或回報出口 IP
-- 一般模式最後 30 秒自動執行 2-flow HTTPS 下載測速與 Bufferbloat delta（單次最多約 100 MB）
+- 一般模式最後 30 秒自動執行 2-flow HTTPS 下載測速與 Bufferbloat delta（單次最多約 100 MB）；速率優先採用排除前 2 秒後、合併兩條 flow 的完整一秒區段中位數
 - Canvas 即時／百分位圖表，不依賴外部圖表 CDN
 - 中英文、一般模式固定白色背景、進階模式可於當次工作階段切換深色，以及 LocalStorage 設定保存
 - JSON、CSV、PNG 與 HTTPS Webhook
 - Online／Offline、Visibility、Auto Stop 與 URL automation
+
+## 開發測試
+
+已安裝 Node.js 的環境可執行：
+
+```text
+npm ci
+npx playwright install chromium
+npm test
+```
+
+Playwright 會執行 `tests.html` 及縮時的 Consumer 完整流程；正式三分鐘常數不會因測試而改變。每次 push／pull request 至 `main` 時，GitHub Actions 也會自動執行相同測試。
 
 ## URL automation
 
