@@ -6,7 +6,7 @@
 
 一般模式採固定三階段導引：「確認環境資訊 → 進行檢測 → 將報告交給 IT」。檢測期間只提供「取消檢測」，完成後才提供「重新檢測」；工程格式匯出、Percentile 切換、分項評分及技術設定均收在進階模式。
 
-Consumer 預設採一頁式白色摘要：桌面版頁首、環境資訊與主內容以 1280 px 最大寬度置中，三張狀態卡等寬排列。完整曲線不佔用首屏，需要時可按「查看即時圖表」在同頁展開，再按一次隱藏。
+Consumer 預設採一頁式白色摘要：桌面版頁首、環境資訊與主內容以 1280 px 最大寬度置中，三張狀態卡等寬排列。完整曲線不佔用首屏，需要時可按「查看即時圖表」在同頁展開；前 60 秒會將現有樣本動態展開，之後切換為最近 60 秒滑動視窗。圖表會標示實際探測端點、時間軸、毫秒刻度、可見區間摘要，並可用滑鼠或觸控查看單筆數值。
 
 NetPulse 是一套可部署於靜態網站的瀏覽器式網路品質監測工具。它以 HTTPS `fetch` 測量應用層請求延遲；Probe 失敗／逾時率不等同 ICMP packet loss。
 
@@ -26,7 +26,7 @@ NetPulse 是一套可部署於靜態網站的瀏覽器式網路品質監測工�
 - Primary／Fallback 雙向 failover
 - 對外出口 IP 顯示：優先使用 Cloudflare Trace，AWS Check IP 備援；公司網路通常顯示 NAT／防火牆出口
 - 一般模式最後 30 秒自動執行 2-flow HTTPS 下載測速與 Bufferbloat delta（單次最多約 100 MB）；速率優先採用排除前 2 秒後、合併兩條 flow 的完整一秒區段中位數
-- Canvas 即時／百分位圖表，不依賴外部圖表 CDN
+- Canvas 即時／百分位圖表：自適應刻度、時間軸、Active Endpoint、抖動曲線及樣本 Tooltip，不依賴外部圖表 CDN
 - 中英文、一般模式固定白色背景、進階模式可於當次工作階段切換深色，以及 LocalStorage 設定保存
 - JSON、CSV、PNG 與 HTTPS Webhook
 - Online／Offline、Visibility、Auto Stop 與 URL automation

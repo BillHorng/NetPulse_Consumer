@@ -1,6 +1,6 @@
 import {
   VERSION, STORAGE_KEY, DEFAULT_SETTINGS, LIMITS, validateSettings, parseAutomation,
-  isSpike, ewma, calculateStats, calculateRating, formatMs, formatPercent, isFinalPhase,
+  isSpike, ewma, calculateStats, calculateRating, calculateChartScale, calculateLiveChartRange, formatMs, formatPercent, isFinalPhase,
 } from './core.mjs';
 import { detectOperatingSystem, detectBrowser, fetchNetworkMetadata } from './device-info.mjs';
 import { DEFAULT_QUICK_TEST_MS, DEFAULT_SPEED_PHASE_MS, SPEED_FLOW_COUNT, SPEED_WARMUP_MS, calculateSpeedMetrics } from './speed-test.mjs';
@@ -15,7 +15,9 @@ const copy = {
     os: '作業系統', browser: '瀏覽器', localTime: '本機時間', timezone: '時區', publicIp: 'IP', publicIpHint: '您的對外連線出口 IP 位址', latency: '連線延遲',
     current: '目前', average: '平均', minimum: '最低', maximum: '最高', failure: '失敗／逾時',
     failCount: '失敗數', failureRate: '失敗率', timeoutRate: '逾時率', maximumSpike: '最大尖峰', spikeCount: '尖峰數',
-    liveChart: '即時曲線', last60: '◷ 最近 60 秒', chartEmpty: '開始監測後，圖表會顯示即時網路品質。',
+    liveChart: '即時曲線', last60: '最近 60 秒', chartEmpty: '開始監測後，圖表會顯示即時網路品質。', chartEndpoint: '探測端點', chartSamples: '有效樣本',
+    latencyLegend: '延遲', jitterLegend: '抖動', timeoutLegend: '逾時／失敗', spikeLegend: '尖峰', axisMs: '延遲／抖動（ms）',
+    chartLiveScope: '圖表最近 60 秒 · 上方平均為最近 {count} 筆', chartBuildingScope: '圖表目前 {seconds} 秒（最多 60 秒）· 上方平均為最近 {count} 筆', chartPercentileScope: '最近 {count} 筆評分樣本', statusTimeout: '逾時', statusFailed: '失敗', statusSpike: '尖峰', statusNormal: '正常',
     score: '總分', settings: '測試設定', restoreDefaults: '還原預設', currentStatus: '目前狀態', ready: 'Ready',
     running: 'Running', paused: 'Paused', elapsed: '運行時間', nextProbe: '下次探測', allEvents: '全部事件',
     time: '時間', event: '事件', noEvents: '尚無事件', helpTitle: '如何解讀監測結果', helpProbeTitle: '這不是 ICMP Ping',
@@ -33,7 +35,9 @@ const copy = {
     os: 'Operating System', browser: 'Browser', localTime: 'Local Time', timezone: 'Timezone', publicIp: 'IP', publicIpHint: 'Your public egress IP address', latency: 'Connection Latency',
     current: 'Current', average: 'Average', minimum: 'Minimum', maximum: 'Maximum', failure: 'Fail / Timeout',
     failCount: 'Fail Count', failureRate: 'Failure %', timeoutRate: 'Timeout %', maximumSpike: 'Maximum Spike', spikeCount: 'Spike Count',
-    liveChart: 'Live Chart', last60: '◷ Last 60 seconds', chartEmpty: 'Start monitoring to see live network quality.',
+    liveChart: 'Live Chart', last60: 'Last 60 seconds', chartEmpty: 'Start monitoring to see live network quality.', chartEndpoint: 'Probe endpoint', chartSamples: 'Valid samples',
+    latencyLegend: 'Latency', jitterLegend: 'Jitter', timeoutLegend: 'Timeout / failed', spikeLegend: 'Spike', axisMs: 'Latency / jitter (ms)',
+    chartLiveScope: 'Chart: last 60 sec · Top average: last {count} samples', chartBuildingScope: 'Chart: {seconds} sec so far (max 60) · Top average: last {count} samples', chartPercentileScope: 'Last {count} rating samples', statusTimeout: 'Timeout', statusFailed: 'Failed', statusSpike: 'Spike', statusNormal: 'Normal',
     score: 'Score', settings: 'Test Settings', restoreDefaults: 'Restore Defaults', currentStatus: 'Current Status', ready: 'Ready',
     running: 'Running', paused: 'Paused', elapsed: 'Elapsed', nextProbe: 'Next Probe', allEvents: 'All Events',
     time: 'Time', event: 'Event', noEvents: 'No events yet', helpTitle: 'Understanding the Results', helpProbeTitle: 'This is not ICMP ping',
@@ -54,6 +58,7 @@ const SPEED_PHASE_MS = Number.isFinite(testConfig.speedPhaseMs) ? testConfig.spe
 
 const automation = parseAutomation(location.search, loadStoredSettings());
 let settings = automation.settings;
+if (document.body.classList.contains('consumer-mode') && !document.body.classList.contains('advanced')) settings.chartMode = 'live';
 const state = {
   running: false, paused: false, samples: [], logs: [], sent: 0, consecutiveFailures: 0,
   endpointKey: 'endpoint', abortController: null, probeTimer: null, countdownTimer: null,
@@ -64,6 +69,7 @@ const state = {
   diagnosticComplete: false, diagnosticStartedAt: null, diagnosticEndedAt: null, reportId: null,
   quickDiagnostic: false, speedPhaseStarted: false,
 };
+let chartPoints = [];
 
 $('#version').textContent = VERSION;
 fillSettingsForm();
@@ -113,6 +119,9 @@ function bindEvents() {
   $('#help-dialog').addEventListener('click', (event) => { if (event.target === $('#help-dialog')) $('#help-dialog').close(); });
   $('#report-button').addEventListener('click', showTextReport);
   $('#chart-toggle').addEventListener('click', toggleConsumerChart);
+  $('#chart').addEventListener('pointermove', showChartTooltip);
+  $('#chart').addEventListener('pointerdown', showChartTooltip);
+  $('#chart').addEventListener('pointerleave', hideChartTooltip);
   $('#report-close').addEventListener('click', () => $('#report-dialog').close());
   $('#report-dialog').addEventListener('click', (event) => { if (event.target === $('#report-dialog')) $('#report-dialog').close(); });
   $('#incident-type').addEventListener('change', renderTextReport);
@@ -179,7 +188,7 @@ function applyLanguage() {
 }
 
 function setChartMode(mode) {
-  settings.chartMode = mode === 'percentile' ? 'percentile' : 'live';
+  settings.chartMode = document.body.classList.contains('advanced') && mode === 'percentile' ? 'percentile' : 'live';
   saveSettings();
   $$('[data-chart]').forEach((button) => button.classList.toggle('active', button.dataset.chart === settings.chartMode));
   drawChart();
@@ -193,7 +202,13 @@ function toggleTheme() {
 
 function toggleAdvanced() {
   document.body.classList.toggle('advanced');
-  if (!document.body.classList.contains('advanced')) document.documentElement.dataset.theme = '';
+  if (!document.body.classList.contains('advanced')) {
+    document.documentElement.dataset.theme = '';
+    if (settings.chartMode !== 'live') {
+      settings.chartMode = 'live';
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    }
+  }
   updateAdvancedControl();
   requestAnimationFrame(drawChart);
 }
@@ -655,31 +670,65 @@ function drawChart() {
   canvas.width = Math.round(rect.width * dpr); canvas.height = Math.round(rect.height * dpr);
   const context = canvas.getContext('2d'); context.scale(dpr, dpr);
   const style = getComputedStyle(document.documentElement);
-  const colors = { text: style.getPropertyValue('--muted'), line: style.getPropertyValue('--line'), blue: '#0874f9', purple: '#7445ed', red: '#ff4652', orange: '#fb8b18', gray: '#a9b5c7' };
-  const pad = { left: 46, right: 14, top: 10, bottom: 28 }, width = rect.width - pad.left - pad.right, height = rect.height - pad.top - pad.bottom;
+  const colors = { text: style.getPropertyValue('--muted').trim(), line: style.getPropertyValue('--line').trim(), blue: '#0874f9', purple: '#7445ed', red: '#ff4652', orange: '#fb8b18' };
+  const pad = { left: 62, right: 14, top: 12, bottom: 34 }, width = rect.width - pad.left - pad.right, height = rect.height - pad.top - pad.bottom;
   context.clearRect(0, 0, rect.width, rect.height);
-  const valid = state.samples.filter((sample) => Number.isFinite(sample.latency));
-  $('#chart-empty').style.display = valid.length ? 'none' : 'grid';
-  const data = settings.chartMode === 'live' ? state.samples.filter((sample) => sample.timestamp >= Date.now() - 60000) : [...valid].sort((a, b) => a.latency - b.latency);
-  const maxValue = Math.max(100, ...data.flatMap((sample) => [sample.latency || 0, sample.jitter || 0]));
-  const yMax = Math.ceil(maxValue / 100) * 100;
+  const now = Date.now();
+  const liveRange = calculateLiveChartRange(state.samples, now);
+  const scopeSamples = settings.chartMode === 'live'
+    ? state.samples.filter((sample) => sample.timestamp >= liveRange.start)
+    : state.samples.slice(-settings.percentileN);
+  const data = settings.chartMode === 'live'
+    ? scopeSamples
+    : scopeSamples.filter((sample) => sample.status === 'ok' && !sample.warmUp && Number.isFinite(sample.latency)).sort((a, b) => a.latency - b.latency);
+  const plottedValues = data.flatMap((sample) => [sample.latency, sample.jitter]).filter(Number.isFinite);
+  const { yMax, step } = calculateChartScale(plottedValues);
+  const visibleStats = calculateStats(scopeSamples, Math.max(1, scopeSamples.length));
+  $('#chart-empty').style.display = plottedValues.length ? 'none' : 'grid';
+  setText('chart-current', formatMs(visibleStats.current)); setText('chart-average', formatMs(visibleStats.mean));
+  setText('chart-min', formatMs(visibleStats.min)); setText('chart-max', formatMs(visibleStats.max)); setText('chart-samples', visibleStats.successCount);
+  const endpoint = hostOf(settings[state.endpointKey]);
+  $('#chart-target').textContent = `${copy[settings.lang].chartEndpoint}: ${endpoint}`;
+  const scopeKey = settings.chartMode === 'percentile' ? 'chartPercentileScope' : liveRange.duration >= 60000 ? 'chartLiveScope' : 'chartBuildingScope';
+  $('#chart-scope').textContent = copy[settings.lang][scopeKey]
+    .replace('{seconds}', Math.max(1, Math.ceil(liveRange.duration / 1000)))
+    .replace('{count}', settings.percentileN);
+  canvas.dataset.rangeSeconds = String(Math.round(liveRange.duration / 1000));
+  canvas.dataset.pointCount = String(data.length);
+  canvas.setAttribute('aria-label', `${copy[settings.lang].axisMs}; ${$('#chart-scope').textContent}; ${copy[settings.lang].chartEndpoint}: ${endpoint}`);
   context.font = '11px system-ui'; context.fillStyle = colors.text; context.strokeStyle = colors.line; context.lineWidth = 1;
-  for (let i = 0; i <= 5; i += 1) {
-    const y = pad.top + height * i / 5;
+  const tickCount = Math.round(yMax / step);
+  for (let i = 0; i <= tickCount; i += 1) {
+    const value = i * step;
+    const y = pad.top + height * (1 - value / yMax);
     context.beginPath(); context.moveTo(pad.left, y); context.lineTo(pad.left + width, y); context.stroke();
-    context.textAlign = 'right'; context.fillText(Math.round(yMax * (1 - i / 5)), pad.left - 8, y + 4);
+    context.textAlign = 'right'; context.fillText(String(value), pad.left - 8, y + 4);
   }
+  context.save(); context.translate(13, pad.top + height / 2); context.rotate(-Math.PI / 2); context.textAlign = 'center'; context.fillText(copy[settings.lang].axisMs, 0, 0); context.restore();
+  if (settings.chartMode === 'live') {
+    context.textAlign = 'center'; context.fillStyle = colors.text;
+    for (let i = 0; i <= 4; i += 1) {
+      const x = pad.left + width * i / 4;
+      context.fillText(formatChartTime(liveRange.start + liveRange.duration * i / 4), x, rect.height - 8);
+    }
+  }
+  chartPoints = [];
   if (!data.length) return;
   const xAt = (sample, index) => settings.chartMode === 'live'
-    ? pad.left + width * Math.max(0, (sample.timestamp - (Date.now() - 60000)) / 60000)
+    ? pad.left + width * Math.min(1, Math.max(0, (sample.timestamp - liveRange.start) / liveRange.duration))
     : pad.left + width * index / Math.max(1, data.length - 1);
   const yAt = (value) => pad.top + height * (1 - Math.min(yMax, value || 0) / yMax);
   drawSeries('latency', colors.blue, 2); drawSeries('jitter', colors.purple, 1.5);
   data.forEach((sample, index) => {
-    if (sample.status !== 'ok' || sample.spike || sample.warmUp) {
-      const value = Number.isFinite(sample.latency) ? sample.latency : yMax;
+    const value = Number.isFinite(sample.latency) ? sample.latency : yMax;
+    chartPoints.push({ x: xAt(sample, index), y: yAt(value), sample });
+    if (sample.status === 'ok' && Number.isFinite(sample.latency)) {
+      context.beginPath(); context.arc(xAt(sample, index), yAt(sample.latency), 1.8, 0, Math.PI * 2);
+      context.fillStyle = colors.blue; context.fill();
+    }
+    if (sample.status !== 'ok' || sample.spike) {
       context.beginPath(); context.arc(xAt(sample, index), yAt(value), 3.5, 0, Math.PI * 2);
-      context.fillStyle = sample.status !== 'ok' ? colors.red : sample.spike ? colors.orange : colors.gray; context.fill();
+      context.fillStyle = sample.status !== 'ok' ? colors.red : colors.orange; context.fill();
     }
   });
   if (settings.chartMode === 'percentile') {
@@ -689,7 +738,7 @@ function drawChart() {
     });
   }
   function drawSeries(key, color, lineWidth) {
-    context.beginPath(); context.strokeStyle = color; context.lineWidth = lineWidth; let open = false;
+    context.beginPath(); context.strokeStyle = color; context.lineWidth = lineWidth; context.lineJoin = 'round'; context.lineCap = 'round'; let open = false;
     data.forEach((sample, index) => {
       const value = sample[key];
       if (!Number.isFinite(value) || sample.status !== 'ok') { open = false; return; }
@@ -699,6 +748,29 @@ function drawChart() {
     });
     context.stroke();
   }
+}
+
+function formatChartTime(timestamp) {
+  return new Date(timestamp).toLocaleTimeString(settings.lang === 'zh' ? 'zh-TW' : 'en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function showChartTooltip(event) {
+  if (!chartPoints.length) return;
+  const canvas = $('#chart'), tooltip = $('#chart-tooltip'), rect = canvas.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const point = chartPoints.reduce((nearest, candidate) => Math.abs(candidate.x - x) < Math.abs(nearest.x - x) ? candidate : nearest);
+  if (Math.abs(point.x - x) > 28) { hideChartTooltip(); return; }
+  const sample = point.sample;
+  const statusKey = sample.status === 'timeout' ? 'statusTimeout' : sample.status !== 'ok' ? 'statusFailed' : sample.spike ? 'statusSpike' : 'statusNormal';
+  tooltip.textContent = `${formatChartTime(sample.timestamp)} · ${copy[settings.lang].latencyLegend} ${formatMs(sample.latency, 1)} · ${copy[settings.lang].jitterLegend} ${formatMs(sample.jitter, 1)} · ${copy[settings.lang][statusKey]}`;
+  tooltip.style.left = `${Math.min(rect.width - 110, Math.max(110, point.x))}px`;
+  tooltip.style.top = `${Math.max(48, point.y - 7)}px`;
+  tooltip.style.display = 'block'; tooltip.setAttribute('aria-hidden', 'false');
+}
+
+function hideChartTooltip() {
+  const tooltip = $('#chart-tooltip');
+  tooltip.style.display = 'none'; tooltip.setAttribute('aria-hidden', 'true');
 }
 
 async function detectClient() {

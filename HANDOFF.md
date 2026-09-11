@@ -13,7 +13,7 @@ Consumer 預設流程為 3 分鐘快速診斷。一般模式按下 Start 時會�
 | 項目 | 內容 |
 | --- | --- |
 | 專案名稱 | NetPulse｜網路品質監測平台 |
-| 目前版本 | v1.0.3 |
+| 目前版本 | v1.0.4 |
 | 應用類型 | 無後端、可靜態部署的瀏覽器應用程式 |
 | 主要語言 | HTML、CSS、原生 JavaScript ES Modules |
 | 套件建置 | 正式頁面無建置步驟；npm／Playwright 僅供開發測試 |
@@ -76,7 +76,7 @@ NetPulse_Consumer/
 | `report.mjs` | 組合中英文文字報告，不直接讀取 DOM |
 | `index.html` | 維持語義化標記、無障礙 label 與固定 DOM ID |
 | `styles.css` | 顏色使用 CSS variables；響應式斷點目前為 1360、980、680 px |
-| `tests.html` | 核心與安全邊界回歸測試；目前應顯示 `PASS 14/14` |
+| `tests.html` | 核心與安全邊界回歸測試；目前應顯示 `PASS 16/16` |
 | `e2e/` | 驗證 1366 × 650 首屏、縮時完整流程、對外出口 IP、Tooltip 與 IT 報告 |
 
 ## 4. 本機啟動
@@ -221,9 +221,13 @@ Grade：
 
 圖表以原生 Canvas 繪製，不依賴外部 Chart CDN：
 
-- Live：顯示最近約 60 秒。
-- Percentile：顯示排序後延遲，標示 P50、P75、P90、P95、P99。
-- 可分辨 Normal、Warm-up、Spike、Failed／Timeout。
+- Live：未滿 60 秒時從第一筆樣本動態展開整個圖面，滿 60 秒後才切換為最近 60 秒滑動視窗；X 軸使用實際時間，避免初期樣本全部擠在右側而看似沒有波動。
+- 延遲線會繪製小型取樣點，協助辨識細微波動；Y 軸仍從 0 ms 起算，避免用截斷座標誇大差異。
+- 下方摘要的目前／平均／最低／最高與有效樣本只計算同一個可見區間。上方品質摘要仍使用 `percentileN` 評分視窗；圖表標頭會明示目前累積秒數或最近 60 秒，以及上方平均最近 N 筆。
+- Percentile：只使用最近 `percentileN` 筆有效延遲排序，並標示 P50、P75、P90、P95、P99；不再混入評分視窗以外的舊樣本。
+- Y 軸標示「延遲／抖動（ms）」，由 `calculateChartScale()` 依可見數值產生含 10% headroom 的易讀刻度，不再固定以 100 ms 粗略進位。
+- 圖表標頭顯示實際 Active Endpoint；一般圖例簡化為延遲、抖動、尖峰與逾時／失敗。暖機樣本仍由內部統計排除，但不顯示灰色標記或圖例。
+- 滑鼠移動或觸控圖表時，Tooltip 顯示最近樣本的時間、Latency、Jitter 與狀態。
 - `document.hidden` 時停止不必要的重繪，但 Probe 繼續執行。
 
 ### 5.8 匯出
@@ -258,6 +262,35 @@ PNG 有兩層本地路徑：
 | Stress Cap | 100 MB | 每次 session |
 
 若需要修改預設值，請編輯 `core.mjs` 的 `DEFAULT_SETTINGS`；數值限制則位於 `LIMITS`。
+
+### 6.1 測試端點的選擇與安全理由
+
+目前各外部端點的責任必須保持分離：
+
+| 用途 | 預設端點 | 選用理由 |
+| --- | --- | --- |
+| 一般 HTTPS Probe | `https://checkip.amazonaws.com` | AWS 提供的輕量純文字回應，內容小，適合重複測量應用層往返時間 |
+| Probe failover | `https://one.one.one.one/cdn-cgi/trace` | 與 Primary 不同的 Cloudflare 網路，可避免單一服務不可用就誤判整段連線中斷 |
+| 下載測速 | `https://speed.cloudflare.com/__down?bytes=10000000` | Cloudflare 提供的 Internet speed test 下載端點，可取得固定大小資料流 |
+| 出口 IP／Colo／Location | `https://www.cloudflare.com/cdn-cgi/trace`，IP 失敗時使用 AWS | `/cdn-cgi/trace` 是 Cloudflare 管理的診斷端點；AWS 僅作 IP fallback |
+
+這些端點都是實際的外部 HTTPS 服務。Probe 與下載測速使用 GET、`credentials: 'omit'` 及 `cache: 'no-store'`，不附帶 Cookie／HTTP 登入憑證、不上傳使用者檔案，也不執行遠端回應中的程式碼。外部服務仍會看見來源出口 IP、User-Agent 及一般連線 metadata；這是建立 HTTPS 連線與識別出口 IP 無法避免的資訊。完整 IT 報告只有使用者手動設定 Webhook 後才會送出。
+
+不以 Google 首頁作為預設 Probe／測速端點，原因如下：
+
+- Google 首頁不是公開的健康檢查或測速 API，重新導向、快取、區域化頁面、Bot 防護及限流都可能使樣本失真或不穩定。
+- Google 回應較大且內容可能變動；頻繁存取一般網站也不是其設計用途。
+- 測到的是「到 Google 的路徑」，不能代表公司系統、VPN、Microsoft 365 或整體 Internet 品質；知名網站不等同中立的量測端點。
+- 即使改用 Google，仍只能證明該目的地當下可達，無法定位公司系統自身的異常。
+
+若正式企業部署需要反映真實工作情境，建議保留 AWS／Cloudflare 作為 Internet baseline，另建立企業自有、無登入、無 Cookie、支援 HTTPS／CORS／no-store 且具容量控管的 `/health` 端點，分開呈現「Internet 品質」與「公司系統可達性」。不可直接對正式業務頁面執行下載壓力測試。
+
+供後續維護核對的官方資料：
+
+- AWS Check IP：`https://docs.aws.amazon.com/powershell/v4/userguide/aws-pst-v4-ug.pdf`
+- Cloudflare `/cdn-cgi/`：`https://developers.cloudflare.com/fundamentals/reference/cdn-cgi-endpoint/`
+- Cloudflare Internet speed test：`https://developers.cloudflare.com/fundamentals/performance/test-speed/`
+- Fetch credentials：`https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch`
 
 ## 7. URL Automation
 
@@ -299,7 +332,7 @@ Endpoint、Fallback、Download URL、Stress 與 Webhook 不接受 Query String �
 - 測速暖機排除、分段中位數及 aggregate fallback
 - 固定時間輸入的報告編號
 
-目前執行結果為：`PASS 14/14`。
+目前執行結果為：`PASS 16/16`。
 
 本次 UI 回歸另以 Chrome 驗證 1920 × 768 與 1366 × 650：一般模式均為白色背景、主要區塊左右邊界一致，1366 × 650 可在首屏完整顯示而不需捲動。
 
@@ -365,13 +398,13 @@ report.mjs
 
 ```js
 // core.mjs
-export const VERSION = '1.0.3';
+export const VERSION = '1.0.4';
 ```
 
 頁首、JSON 報告及 PNG 報告都會讀取此常數。發版時：
 
 1. 更新 `core.mjs` 的 `VERSION`。
-2. 執行 `tests.html`，確認 `PASS 14/14`。
+2. 執行 `tests.html`，確認 `PASS 16/16`。
 3. 在有 Node.js 的環境執行 `npm ci` 與 `npm test`。
 4. 完成第 8.3 節 Smoke Test。
 5. 檢查 README 與本手冊是否需要同步。
@@ -402,6 +435,17 @@ export const VERSION = '1.0.3';
 - 畫面使用 `IP` 標籤與對外出口 Tooltip，IT／JSON 報告使用明確的 `publicIp` 命名。
 - Cloudflare Trace 為主要來源，AWS Check IP 為備援；例如公司網路可能顯示 `59.125.x.x`。
 - 瀏覽器單元測試：`PASS 14/14`；Playwright E2E：`2 passed`，包含出口 IP、Tooltip、首屏與 IT 報告驗證。
+
+### 10.4 2026-09-11 即時曲線可讀性與範圍修正
+
+- 發布版本：`v1.0.4`。
+- Live 圖加入實際時間軸、毫秒軸標題、Active Endpoint、可見區間摘要與滑鼠／觸控 Tooltip。
+- Jitter 圖例依使用者需求簡化為「抖動」；底層數值仍沿用 EWMA 計算。暖機樣本保留內部排除邏輯，但取消圖例、灰色標記及 Tooltip 狀態。
+- 新增自適應 Y 軸刻度與 headroom；小幅延遲不再被固定 100 ms 級距壓縮，尖峰也不會貼齊圖表頂端。
+- 圖表明示最近 60 秒與上方 `percentileN` 評分視窗的差異；Percentile 圖改為只使用最近 `percentileN` 筆有效樣本。
+- `calculateChartScale()` 已拆為純函數並加入低延遲、中延遲與尖峰尺度測試；Playwright 覆蓋端點、範圍摘要、有效樣本及 Tooltip。
+- 修正固定 60 秒 X 軸造成初期樣本擠在右側的問題：未滿 60 秒動態展開，滿 60 秒後滑動；延遲線加入小型取樣點。`calculateLiveChartRange()` 已加入早期展開、60 秒上限及空資料測試。
+- Consumer 一般模式現在一律鎖定 Live：初始化時忽略 LocalStorage／URL 中殘留的 Percentile 狀態，`setChartMode()` 只允許進階模式切換 Percentile，離開進階模式立即回到 Live 並保存。Playwright 會預載 Percentile 舊設定並驗證載入與退出進階模式後都維持即時曲線。
 
 ## 11. 已知限制與風險
 

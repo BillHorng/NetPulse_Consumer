@@ -62,9 +62,10 @@
 
         <div class="consumer-chart-row">
           <article class="panel chart-panel">
-            <div class="panel-toolbar"><div class="segmented"><button data-chart="live" class="active" data-i18n="liveChart">即時曲線</button><button data-chart="percentile">Percentile</button></div><span class="chart-window" data-i18n="last60">◷ 最近 60 秒</span></div>
-            <div class="chart-legend"><span class="blue">— <span>Latency</span></span><span class="purple">— <span>Jitter</span></span><span class="red">● <span>Timeout</span></span><span class="orange">● <span>Spike</span></span><span class="gray">● <span>Warm-up</span></span></div>
-            <div class="canvas-wrap"><canvas id="chart" role="img" aria-label="Latency and jitter chart"></canvas><div class="chart-empty" id="chart-empty" data-i18n="chartEmpty">開始監測後，圖表會顯示即時網路品質。</div></div>
+            <div class="panel-toolbar"><div class="segmented"><button data-chart="live" class="active" data-i18n="liveChart">即時曲線</button><button data-chart="percentile">Percentile</button></div><div class="chart-meta"><span id="chart-target">探測端點：—</span><span class="chart-window" id="chart-scope">最近 60 秒</span></div></div>
+            <div class="chart-legend"><span class="blue">— <span data-i18n="latencyLegend">延遲</span></span><span class="purple">— <span data-i18n="jitterLegend">抖動</span></span><span class="red">● <span data-i18n="timeoutLegend">逾時／失敗</span></span><span class="orange">● <span data-i18n="spikeLegend">尖峰</span></span></div>
+            <div class="canvas-wrap"><canvas id="chart" role="img" aria-label="最近 60 秒延遲與抖動圖表"></canvas><div class="chart-empty" id="chart-empty" data-i18n="chartEmpty">開始監測後，圖表會顯示即時網路品質。</div><div class="chart-tooltip" id="chart-tooltip" role="status" aria-hidden="true"></div></div>
+            <div class="chart-summary" aria-label="最近 60 秒圖表摘要"><span><small data-i18n="current">目前</small><strong id="chart-current">—</strong></span><span><small data-i18n="average">平均</small><strong id="chart-average">—</strong></span><span><small data-i18n="minimum">最低</small><strong id="chart-min">—</strong></span><span><small data-i18n="maximum">最高</small><strong id="chart-max">—</strong></span><span><small data-i18n="chartSamples">有效樣本</small><strong id="chart-samples">0</strong></span></div>
           </article>
           <article class="panel highlights-panel">
             <h2><span>✦</span><span data-i18n="keySummary">重點摘要</span></h2>

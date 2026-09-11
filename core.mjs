@@ -1,4 +1,4 @@
-export const VERSION = '1.0.3';
+export const VERSION = '1.0.4';
 export const STORAGE_KEY = 'netpulse-consumer-settings-v1';
 
 export const DEFAULT_SETTINGS = Object.freeze({
@@ -120,6 +120,25 @@ export function isSpike(latency, history) {
 
 export function ewma(previous, value, alpha = 0.2) {
   return previous === null || !Number.isFinite(previous) ? value : alpha * value + (1 - alpha) * previous;
+}
+
+export function calculateChartScale(values = []) {
+  const finite = values.filter((value) => Number.isFinite(value) && value >= 0);
+  const maximum = finite.length ? Math.max(...finite) : 0;
+  const target = Math.max(50, maximum * 1.1);
+  const roughStep = target / 5;
+  const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+  const normalized = roughStep / magnitude;
+  const factor = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10;
+  const step = factor * magnitude;
+  return { step, yMax: Math.ceil(target / step) * step };
+}
+
+export function calculateLiveChartRange(samples = [], now = Date.now(), windowMs = 60000) {
+  const timestamps = samples.map((sample) => sample.timestamp).filter(Number.isFinite);
+  const firstTimestamp = timestamps.length ? Math.min(...timestamps) : now;
+  const duration = Math.min(windowMs, Math.max(1000, now - firstTimestamp));
+  return { start: now - duration, end: now, duration };
 }
 
 export function calculateStats(samples, percentileN = 200, buffer = {}) {
