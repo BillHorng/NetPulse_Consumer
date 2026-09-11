@@ -16,60 +16,30 @@ export function detectBrowser(userAgent = '') {
   return safari ? `Safari ${safari}` : 'Browser';
 }
 
-export function candidateAddress(candidate) {
-  if (!candidate) return null;
-  const text = candidate.candidate || '';
-  const type = candidate.type || /\btyp\s+(\w+)/.exec(text)?.[1];
-  const address = candidate.address || text.split(/\s+/)[4];
-  return type === 'host' && isUsableIpAddress(address) ? address : null;
+export function parseCloudflareTrace(text = '') {
+  const trace = Object.fromEntries(String(text).trim().split('\n').map((line) => line.split('=')));
+  return { publicIp: isIpAddress(trace.ip) ? trace.ip : '—', colo: trace.colo || '—', location: trace.loc || '—' };
 }
 
-export function isUsableIpAddress(value) {
-  if (typeof value !== 'string' || !value || value.endsWith('.local')) return false;
-  if (value.includes(':')) return value !== '::' && value !== '::1';
+export function isIpAddress(value) {
+  if (typeof value !== 'string' || !value) return false;
+  if (value.includes(':')) return /^[0-9a-f:.]+$/i.test(value) && value !== '::';
   const parts = value.split('.').map(Number);
-  return parts.length === 4 && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)
-    && value !== '0.0.0.0' && !value.startsWith('127.');
+  return parts.length === 4 && parts.every((part) => Number.isInteger(part) && part >= 0 && part <= 255);
 }
 
-export function isPrivateIpv4(value) {
-  const parts = String(value).split('.').map(Number);
-  return parts.length === 4 && (parts[0] === 10 || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 192 && parts[1] === 168));
-}
-
-export async function detectDeviceIps(PeerConnection = globalThis.RTCPeerConnection) {
-  if (!PeerConnection) return [];
-  let connection;
-  try { connection = new PeerConnection({ iceServers: [] }); }
-  catch { return []; }
-  const addresses = new Set();
-  const collect = (candidate) => {
-    const address = candidateAddress(candidate);
-    if (address) addresses.add(address);
-  };
-  try {
-    connection.createDataChannel('device-ip');
-    connection.addEventListener('icecandidate', (event) => collect(event.candidate));
-    const offer = await connection.createOffer();
-    await connection.setLocalDescription(offer);
-    await new Promise((resolve) => {
-      const timer = setTimeout(resolve, 1500);
-      connection.addEventListener('icegatheringstatechange', () => {
-        if (connection.iceGatheringState === 'complete') { clearTimeout(timer); resolve(); }
-      });
-    });
-    connection.localDescription?.sdp.split('\n').filter((line) => line.includes('candidate:')).forEach((line) => collect({ candidate: line }));
-  } catch { /* Browser privacy settings may suppress host candidates. */ }
-  finally { connection.close(); }
-  return [...addresses].sort((a, b) => Number(isPrivateIpv4(b)) - Number(isPrivateIpv4(a)) || a.localeCompare(b));
-}
-
-export async function fetchCdnMetadata(fetchImpl = globalThis.fetch) {
+export async function fetchNetworkMetadata(fetchImpl = globalThis.fetch) {
+  let metadata = { publicIp: '—', colo: '—', location: '—' };
   try {
     const response = await fetchImpl('https://www.cloudflare.com/cdn-cgi/trace', { cache: 'no-store' });
-    const trace = Object.fromEntries((await response.text()).trim().split('\n').map((line) => line.split('=')));
-    return { colo: trace.colo || '—', location: trace.loc || '—' };
-  } catch {
-    return { colo: '—', location: '—' };
-  }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    metadata = parseCloudflareTrace(await response.text());
+  } catch { /* AWS fallback below still attempts the egress IP. */ }
+  if (metadata.publicIp !== '—') return metadata;
+  try {
+    const response = await fetchImpl('https://checkip.amazonaws.com', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const publicIp = (await response.text()).trim();
+    return { ...metadata, publicIp: isIpAddress(publicIp) ? publicIp : '—' };
+  } catch { return metadata; }
 }

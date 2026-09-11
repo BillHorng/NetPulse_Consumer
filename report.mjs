@@ -47,7 +47,7 @@ export function buildDiagnosticText(model) {
     '',
     '【裝置與網路環境】',
     `作業系統：${clientInfo.os}`, `瀏覽器：${clientInfo.browser}`, `時區：${clientInfo.timezone}`,
-    `設備 IP：${clientInfo.deviceIp}`, `CDN Node / Colo：${clientInfo.colo}`, `Location：${clientInfo.loc}`,
+    `對外出口 IP：${clientInfo.publicIp}`, `CDN Node / Colo：${clientInfo.colo}`, `Location：${clientInfo.loc}`,
     `Active Endpoint：${activeEndpoint}`,
     '',
     '註：本工具測量瀏覽器 HTTPS Probe latency；失敗／逾時率不等同 ICMP packet loss。下載測速不包含上傳速度，且會受端點、VPN、Proxy、公司閘道及其他流量影響。',
@@ -72,7 +72,7 @@ export function buildDiagnosticText(model) {
     `Speed method: ${method}`, `Download endpoint: ${downloadEndpoint}`, '',
     '[CLIENT / NETWORK]',
     `OS: ${clientInfo.os}`, `Browser: ${clientInfo.browser}`, `Timezone: ${clientInfo.timezone}`,
-    `Device IP: ${clientInfo.deviceIp}`, `CDN Node / Colo: ${clientInfo.colo}`, `Location: ${clientInfo.loc}`,
+    `Public egress IP: ${clientInfo.publicIp}`, `CDN Node / Colo: ${clientInfo.colo}`, `Location: ${clientInfo.loc}`,
     `Active Endpoint: ${activeEndpoint}`, '',
     'Note: This tool measures browser HTTPS probe latency. Failure/timeout rate is not ICMP packet loss. The download test excludes upload speed and is affected by the endpoint, VPN, proxy, enterprise gateway and competing traffic.',
   ];

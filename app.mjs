@@ -2,7 +2,7 @@ import {
   VERSION, STORAGE_KEY, DEFAULT_SETTINGS, LIMITS, validateSettings, parseAutomation,
   isSpike, ewma, calculateStats, calculateRating, formatMs, formatPercent, isFinalPhase,
 } from './core.mjs';
-import { detectOperatingSystem, detectBrowser, detectDeviceIps, fetchCdnMetadata } from './device-info.mjs';
+import { detectOperatingSystem, detectBrowser, fetchNetworkMetadata } from './device-info.mjs';
 import { DEFAULT_QUICK_TEST_MS, DEFAULT_SPEED_PHASE_MS, SPEED_FLOW_COUNT, SPEED_WARMUP_MS, calculateSpeedMetrics } from './speed-test.mjs';
 import { buildDiagnosticText, createReportId } from './report.mjs';
 
@@ -12,7 +12,7 @@ const $$ = (selector) => [...document.querySelectorAll(selector)];
 const copy = {
   zh: {
     subtitle: '網路品質監測平台', start: '開始 3 分鐘檢測', startAdvanced: '開始監測', pause: '暫停', cancel: '取消檢測', reset: '重設', retry: '重新檢測', export: '匯出報告',
-    os: '作業系統', browser: '瀏覽器', localTime: '本機時間', timezone: '時區', deviceIp: '設備 IP', deviceIpUnavailable: '瀏覽器未提供', latency: '連線延遲',
+    os: '作業系統', browser: '瀏覽器', localTime: '本機時間', timezone: '時區', publicIp: 'IP', publicIpHint: '您的對外連線出口 IP 位址', latency: '連線延遲',
     current: '目前', average: '平均', minimum: '最低', maximum: '最高', failure: '失敗／逾時',
     failCount: '失敗數', failureRate: '失敗率', timeoutRate: '逾時率', maximumSpike: '最大尖峰', spikeCount: '尖峰數',
     liveChart: '即時曲線', last60: '◷ 最近 60 秒', chartEmpty: '開始監測後，圖表會顯示即時網路品質。',
@@ -21,7 +21,7 @@ const copy = {
     time: '時間', event: '事件', noEvents: '尚無事件', helpTitle: '如何解讀監測結果', helpProbeTitle: '這不是 ICMP Ping',
     helpProbe: 'NetPulse 透過瀏覽器 HTTPS 請求測量應用層往返時間。失敗／逾時率代表 Probe 請求結果，不等同 L3 封包遺失率。',
     helpRating: '評分綜合延遲、Jitter、Wilson 失敗率、尖峰與 Bufferbloat，並以最差瓶頸限制總分。',
-    helpPrivacy: '頁面會連線 Cloudflare 與 AWS 取得網路環境及執行測試。樣本預設只存在記憶體中；只有手動設定 Webhook 時才會傳送完整報告。',
+    helpPrivacy: 'IP 顯示外部服務看到的對外連線出口；公司網路通常是 NAT／防火牆出口，使用 VPN 或 Proxy 時可能是其出口。樣本預設只存在記憶體中；只有手動設定 Webhook 時才會傳送完整報告。',
     saved: '設定已儲存', invalidUrl: 'URL 格式不正確，已保留原設定', advancedInfo: '進階資訊', simpleView: '返回簡潔',
     keySummary: '重點摘要', overallQuality: '整體品質', connectionStability: '連線穩定度', responsiveness: '反應速度', consistency: '延遲一致性', ratingProgress: '評級進度',
     estimatedRemaining: '預計剩餘時間', itReport: 'IT 文字報告', reportTitle: '網路檢測文字摘要', symptom: '當時遇到的狀況', symptomSlow: '網路變慢', symptomDisconnect: '連線中斷', symptomMeeting: '視訊／語音卡頓', symptomUnreachable: '系統或網站連不上', symptomOther: '其他', additionalNote: '補充描述（選填）', notePlaceholder: '例如：開會時聲音斷斷續續、公司系統無法登入', reportHint: '請複製下方內容提供給 IT；報告不會自動上傳。', downloadTxt: '下載 TXT', copyText: '複製文字', copied: '已複製，可貼給 IT',
@@ -30,7 +30,7 @@ const copy = {
   },
   en: {
     subtitle: 'Network Quality Monitor', start: 'Start 3-minute Check', startAdvanced: 'Start Monitoring', pause: 'Pause', cancel: 'Cancel Check', reset: 'Reset', retry: 'Run Again', export: 'Export',
-    os: 'Operating System', browser: 'Browser', localTime: 'Local Time', timezone: 'Timezone', deviceIp: 'Device IP', deviceIpUnavailable: 'Not exposed by browser', latency: 'Connection Latency',
+    os: 'Operating System', browser: 'Browser', localTime: 'Local Time', timezone: 'Timezone', publicIp: 'IP', publicIpHint: 'Your public egress IP address', latency: 'Connection Latency',
     current: 'Current', average: 'Average', minimum: 'Minimum', maximum: 'Maximum', failure: 'Fail / Timeout',
     failCount: 'Fail Count', failureRate: 'Failure %', timeoutRate: 'Timeout %', maximumSpike: 'Maximum Spike', spikeCount: 'Spike Count',
     liveChart: 'Live Chart', last60: '◷ Last 60 seconds', chartEmpty: 'Start monitoring to see live network quality.',
@@ -39,7 +39,7 @@ const copy = {
     time: 'Time', event: 'Event', noEvents: 'No events yet', helpTitle: 'Understanding the Results', helpProbeTitle: 'This is not ICMP ping',
     helpProbe: 'NetPulse measures application-layer round-trip time using browser HTTPS requests. Failure and timeout rates describe probes, not L3 packet loss.',
     helpRating: 'The rating combines latency, jitter, Wilson failure bound, spikes and bufferbloat, with a cap based on the weakest bottleneck.',
-    helpPrivacy: 'The page connects to Cloudflare and AWS for network details and tests. Samples stay in memory; a full report is sent only after a webhook is configured manually.',
+    helpPrivacy: 'IP is the public egress address seen by the external service. It may be the corporate NAT, firewall, VPN or proxy egress. Samples stay in memory; a full report is sent only after a webhook is configured manually.',
     saved: 'Settings saved', invalidUrl: 'Invalid URL; previous setting retained', advancedInfo: 'Advanced', simpleView: 'Simple View',
     keySummary: 'Key Summary', overallQuality: 'Overall Quality', connectionStability: 'Connection Stability', responsiveness: 'Responsiveness', consistency: 'Latency Consistency', ratingProgress: 'Rating Progress',
     estimatedRemaining: 'Estimated Time Left', itReport: 'IT Text Report', reportTitle: 'Network Diagnostic Summary', symptom: 'Issue experienced', symptomSlow: 'Slow network', symptomDisconnect: 'Disconnected', symptomMeeting: 'Video / audio lag', symptomUnreachable: 'System or site unreachable', symptomOther: 'Other', additionalNote: 'Additional note (optional)', notePlaceholder: 'Example: Audio kept cutting out during a meeting', reportHint: 'Copy the text below and send it to IT. Nothing is uploaded automatically.', downloadTxt: 'Download TXT', copyText: 'Copy Text', copied: 'Copied — ready to send to IT',
@@ -169,8 +169,11 @@ function applyLanguage() {
   document.documentElement.lang = settings.lang === 'en' ? 'en' : 'zh-Hant';
   $$('[data-i18n]').forEach((node) => { const value = copy[settings.lang][node.dataset.i18n]; if (value) node.textContent = value; });
   $$('[data-i18n-placeholder]').forEach((node) => { const value = copy[settings.lang][node.dataset.i18nPlaceholder]; if (value) node.placeholder = value; });
-  const deviceIp = $('#device-ip');
-  if (deviceIp?.dataset.unavailable === 'true') deviceIp.textContent = deviceIp.title = copy[settings.lang].deviceIpUnavailable;
+  const publicIp = $('#public-ip');
+  if (publicIp) {
+    publicIp.title = copy[settings.lang].publicIpHint;
+    publicIp.closest('.ip-info').dataset.tooltip = copy[settings.lang].publicIpHint;
+  }
   $$('.language button').forEach((button) => button.classList.toggle('active', button.dataset.lang === settings.lang));
   updateAdvancedControl();
 }
@@ -705,14 +708,8 @@ async function detectClient() {
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const offset = -new Date().getTimezoneOffset();
   setText('timezone', `${zone} (UTC${offset >= 0 ? '+' : ''}${offset / 60})`); renderClock();
-  const deviceIps = await detectDeviceIps();
-  const deviceIp = deviceIps.length ? deviceIps.join(' / ') : copy[settings.lang].deviceIpUnavailable;
-  const deviceIpNode = $('#device-ip');
-  deviceIpNode.dataset.unavailable = String(!deviceIps.length);
-  setText('device-ip', deviceIp);
-  deviceIpNode.title = deviceIp;
-  const metadata = await fetchCdnMetadata();
-  setText('colo', metadata.colo); setText('location', metadata.location);
+  const metadata = await fetchNetworkMetadata();
+  setText('public-ip', metadata.publicIp); setText('colo', metadata.colo); setText('location', metadata.location);
 }
 
 function setOnline(online, log = true) {
@@ -728,7 +725,7 @@ function buildReport() {
     timestamp: new Date().toISOString(),
     version: VERSION,
     clientInfo: {
-      os: $('#client-os').textContent, browser: $('#client-browser').textContent, deviceIp: $('#device-ip').textContent,
+      os: $('#client-os').textContent, browser: $('#client-browser').textContent, publicIp: $('#public-ip').textContent,
       colo: $('#colo').textContent, loc: $('#location').textContent, timezone: $('#timezone').textContent,
     },
     settings: { ...settings },

@@ -4,7 +4,7 @@
 <body><h1>NetPulse Core Tests</h1><pre id="result">Running…</pre>
 <script type="module">
 import { percentile, mad, wilsonUpper, metricScore, isSpike, calculateStats, calculateRating, parseAutomation, normalizeUrl, isFinalPhase } from './core.mjs';
-import { detectOperatingSystem, detectBrowser, candidateAddress } from './device-info.mjs';
+import { detectOperatingSystem, detectBrowser, parseCloudflareTrace, isIpAddress, fetchNetworkMetadata } from './device-info.mjs';
 import { calculateSpeedMetrics } from './speed-test.mjs';
 import { createReportId } from './report.mjs';
 const tests = [];
@@ -23,11 +23,12 @@ test('rating unlock and bottleneck cap', () => { const stats = { p50:20, p95:30,
 test('URL automation clamps safe options and ignores destinations', () => { const parsed = parseAutomation('?host=example.com&download=https://example.com/file&webhook=https://example.com/report&stress=1&interval=50&timeout=9999&autostart=true&samples=30&export=json,png'); equal(parsed.settings.endpoint, 'https://checkip.amazonaws.com/'); equal(parsed.settings.downloadUrl, 'https://speed.cloudflare.com/__down?bytes=10000000'); equal(parsed.settings.stress, false); equal(parsed.settings.intervalMs, 200); equal(parsed.settings.timeoutMs, 5000); equal(parsed.autostart, true); equal(parsed.exports.length, 2); equal('webhook' in parsed, false); });
 test('HTTPS-only URL validation rejects insecure destinations', () => { let rejected = false; try { normalizeUrl('http://example.com', { httpsOnly: true }); } catch { rejected = true; } equal(rejected, true); equal(normalizeUrl('example.com', { httpsOnly: true }), 'https://example.com/'); });
 test('final phase includes 02:30 and excludes 03:00 boundary', () => { equal(isFinalPhase(149999, 180000, 30000), false); equal(isFinalPhase(150000, 180000, 30000), true); equal(isFinalPhase(179999, 180000, 30000), true); equal(isFinalPhase(180000, 180000, 30000), false); });
-test('device metadata parsing remains deterministic', () => { equal(detectOperatingSystem('Mozilla/5.0 (Windows NT 10.0)'), 'Windows 10/11'); equal(detectBrowser('Mozilla/5.0 Chrome/152.0.0.0 Safari/537.36'), 'Chrome 152'); equal(candidateAddress({ candidate: 'candidate:1 1 udp 1 192.168.1.25 5000 typ host' }), '192.168.1.25'); equal(candidateAddress({ candidate: 'candidate:1 1 udp 1 host.local 5000 typ host' }), null); equal(candidateAddress({ candidate: 'candidate:1 1 udp 1 203.0.113.5 5000 typ srflx' }), null); });
+test('client and Cloudflare metadata parsing remains deterministic', () => { equal(detectOperatingSystem('Mozilla/5.0 (Windows NT 10.0)'), 'Windows 10/11'); equal(detectBrowser('Mozilla/5.0 Chrome/152.0.0.0 Safari/537.36'), 'Chrome 152'); const trace = parseCloudflareTrace('ip=2402:7500::1\ncolo=TPE\nloc=TW\n'); equal(trace.publicIp, '2402:7500::1'); equal(trace.colo, 'TPE'); equal(trace.location, 'TW'); equal(isIpAddress('59.125.10.20'), true); equal(isIpAddress('999.125.10.20'), false); });
+test('network metadata falls back to AWS while retaining Cloudflare location', async () => { const requested = []; const metadata = await fetchNetworkMetadata(async (url) => { requested.push(url); return url.includes('cloudflare') ? { ok: true, text: async () => 'colo=TPE\nloc=TW\n' } : { ok: true, text: async () => '59.125.10.20\n' }; }); equal(requested.length, 2); equal(metadata.publicIp, '59.125.10.20'); equal(metadata.colo, 'TPE'); equal(metadata.location, 'TW'); });
 test('speed metrics exclude warm-up and use median aggregate buckets', () => { const speed = calculateSpeedMetrics({ totalBytes: 30_000_000, elapsedMs: 6000, buckets: [2_000_000, 6_000_000, 4_000_000, 99_000_000] }); equal(speed.segmentCount, 4); equal(speed.megabitsPerSecond, 40); equal(speed.method, 'median-segments'); const fallback = calculateSpeedMetrics({ totalBytes: 8_000_000, elapsedMs: 2500, buckets: [8_000_000] }); equal(fallback.megabitsPerSecond, 25.6); equal(fallback.method, 'aggregate'); });
 test('report IDs are stable for a supplied timestamp', () => { equal(createReportId(new Date(2026, 8, 11, 9, 8, 7)), 'NP-20260911090807'); });
 let passed = 0; const failures = [];
-for (const [name, fn] of tests) { try { fn(); passed += 1; } catch (error) { failures.push(`${name}: ${error.message}`); } }
+for (const [name, fn] of tests) { try { await fn(); passed += 1; } catch (error) { failures.push(`${name}: ${error.message}`); } }
 const result = document.querySelector('#result');
 result.dataset.status = failures.length ? 'failed' : 'passed';
 result.textContent = failures.length ? `FAIL ${passed}/${tests.length}\n${failures.join('\n')}` : `PASS ${passed}/${tests.length}`;

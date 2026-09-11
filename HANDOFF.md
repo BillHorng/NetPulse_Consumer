@@ -1,6 +1,6 @@
 # NetPulse 專案交接手冊
 
-> 此副本為 **NetPulse Consumer Edition**。核心監測邏輯與 Engineering Edition 相同，並保留完整的 OS、Browser、時間、時區、設備 IP、Colo、Location 與 Active Endpoint 資訊列。一般畫面使用縮小圖表與白話重點摘要，僅隱藏進階統計、Bufferbloat、設定及 Event Log；使用者可透過頁首「進階資訊」切換完整畫面。
+> 此副本為 **NetPulse Consumer Edition**。核心監測邏輯與 Engineering Edition 相同，並保留完整的 OS、Browser、時間、時區、對外出口 IP、Colo、Location 與 Active Endpoint 資訊列。一般畫面使用縮小圖表與白話重點摘要，僅隱藏進階統計、Bufferbloat、設定及 Event Log；使用者可透過頁首「進階資訊」切換完整畫面。
 
 Consumer 預設流程為 3 分鐘快速診斷。一般模式按下 Start 時會將本次 Auto Stop 固定為 3 分鐘；前 2 分 30 秒建立一般品質與 Idle baseline，最後 30 秒自動啟動下載測速及 Under-load 探測。完成後自動開啟 IT 文字摘要，並列出下載 Mbps、下載量、實際測速秒數與 Bufferbloat。摘要只在瀏覽器記憶體中產生，使用者必須自行複製或下載 TXT，不會自動傳送。
 
@@ -13,7 +13,7 @@ Consumer 預設流程為 3 分鐘快速診斷。一般模式按下 Start 時會�
 | 項目 | 內容 |
 | --- | --- |
 | 專案名稱 | NetPulse｜網路品質監測平台 |
-| 目前版本 | v1.0.2 |
+| 目前版本 | v1.0.3 |
 | 應用類型 | 無後端、可靜態部署的瀏覽器應用程式 |
 | 主要語言 | HTML、CSS、原生 JavaScript ES Modules |
 | 套件建置 | 正式頁面無建置步驟；npm／Playwright 僅供開發測試 |
@@ -36,42 +36,14 @@ NetPulse 透過瀏覽器的 HTTPS `fetch` 請求測量應用層延遲，並根�
 
 頁面會連線 Cloudflare 與 AWS 取得網路環境及執行測試。樣本只存在目前頁面的記憶體中，不會送往 NetPulse 自有後端，也不會在重新整理後保留；只有使用者在進階設定中手動設定 HTTPS Webhook 時，完整報告才會傳送到該 URL。
 
-### 2.1 設備 IP 資料契約
+### 2.1 對外出口 IP 資料契約
 
-- 畫面欄位為 `#device-ip`，JSON 報告欄位為 `clientInfo.deviceIp`，中英文文字報告分別使用「設備 IP」與 `Device IP`。
-- `detectDeviceIps()` 建立不含 STUN／TURN 的 `RTCPeerConnection`，只接受 `typ host` candidate；不以 server-reflexive、出口 IP 或 Cloudflare `trace.ip` 代替。
-- 偵測結果會排除 mDNS `.local`、loopback、未指定位址及格式錯誤的 candidate，並優先排列 RFC1918 IPv4。
-- 瀏覽器不提供 host candidate 時，畫面與報告顯示「瀏覽器未提供」／`Not exposed by browser`；這是有效狀態，不應判定為檢測失敗。
-- Cloudflare trace 目前只使用 `colo` 與 `loc`，即使回應含有 `ip`，程式也不顯示或寫入報告。
-
-### 2.2 如何準確取得設備 IP
-
-瀏覽器靜態頁面無法保證取得設備 IP。瀏覽器可能將 WebRTC host candidate 改寫為 mDNS `.local`，或完全不揭露本機位址；因此目前的 `detectDeviceIps()` 只能作為最佳努力偵測，不能視為準確資料來源。
-
-實作前必須先定義需要的是哪一種 IP：
-
-- **本次檢測實際使用的來源 IP**：最適合網路障礙排查。建議在公司內網部署 HTTPS 診斷端點，由端點回傳 TCP 連線看到的來源位址。端點與設備之間若經過 NAT、VPN、Proxy 或負載平衡器，取得的會是該網路節點轉換後的位址。
-- **設備所有網卡及介面 IP**：必須使用受管理的本機代理程式、桌面程式或 Native Messaging，透過作業系統網路介面 API 讀取，再標示介面名稱、IPv4／IPv6、介面狀態及預設路由。純 GitHub Pages 無法提供這項能力。
-- **IT 資產系統登記的設備 IP**：可由 MDM、EDR、資產管理或企業 API 提供，但它可能不是使用者開始檢測當下的實際來源 IP，必須附上資料時間。
-
-NetPulse 的建議方案是增加企業內網 `client-ip` HTTPS API，回傳最小資料：
-
-```json
-{
-  "ip": "192.168.10.25",
-  "observedAt": "2026-09-10T16:30:00+08:00"
-}
-```
-
-安全與部署要求：
-
-- API 必須由公司管理、使用 HTTPS、限制 CORS 為 NetPulse 正式來源，並停用快取。
-- 若前方有 Reverse Proxy，只能信任已知 Proxy 寫入的轉送標頭；不得直接相信任意用戶端送來的 `X-Forwarded-For`。
-- 報告應同時記錄 IP、觀測時間與取得方式，例如 `source: "intranet-api"`，避免 IT 將歷史或轉換後的 IP 誤認為設備網卡位址。
-- 不應使用公共 STUN、第三方 IP API 或 Cloudflare `trace.ip` 冒充設備 IP；這些通常取得的是 NAT／VPN／Proxy 出口位址。
-- API 無法連線時保留「瀏覽器未提供」，不得回退成 Public IP。
-
-若要求「每次都取得設備所有網卡的準確 IP」，正式需求應改為部署受管理的本機代理程式；若只要求「本次檢測封包實際採用的內網來源 IP」，優先採用同網路路徑上的企業內網 HTTPS API。
+- 畫面欄位為 `#public-ip`，標籤簡化為 `IP`，Tooltip 為「您的對外連線出口 IP 位址」／`Your public egress IP address`。
+- JSON 報告欄位為 `clientInfo.publicIp`；中英文文字報告分別使用「對外出口 IP」與 `Public egress IP`。
+- 優先讀取 Cloudflare `cdn-cgi/trace` 的 `ip`、`colo` 與 `loc`；若 Cloudflare 無法提供有效 IP，再使用 AWS `checkip.amazonaws.com`。
+- 回應必須通過 IPv4／IPv6 格式檢查，無有效結果時顯示 `—`。
+- 公司網路通常顯示 NAT／防火牆的出口，例如 `59.125.x.x`；使用 VPN 或 Proxy 時，可能顯示 VPN／Proxy 的出口。
+- 此欄位不是設備內網 IP，不代表 `192.168.x.x`、`10.x.x.x` 或特定網卡位址。
 
 ## 3. 目錄與檔案
 
@@ -81,7 +53,7 @@ NetPulse_Consumer/
 ├─ styles.css                 # 視覺樣式、深色模式、響應式版面
 ├─ app.mjs                    # 應用狀態、Probe、Stress、圖表及 DOM 協調
 ├─ core.mjs                   # 設定、統計及評分純函數
-├─ device-info.mjs            # OS、Browser、設備 IP 與 CDN metadata
+├─ device-info.mjs            # OS、Browser、對外出口 IP 與 CDN metadata
 ├─ speed-test.mjs             # 測速常數、暖機排除與分段中位數
 ├─ report.mjs                 # 報告編號與中英文 IT 文字報告
 ├─ tests.html                 # 不需測試框架的瀏覽器單元測試
@@ -99,13 +71,13 @@ NetPulse_Consumer/
 | --- | --- |
 | `core.mjs` | 僅放無 DOM 相依的純函數；修改演算法時應同步新增測試 |
 | `app.mjs` | 負責狀態、Probe、下載 workers、事件、生命週期與畫面協調 |
-| `device-info.mjs` | 裝置／瀏覽器資訊與 CDN metadata；設備 IP 行為暫不擴充 |
+| `device-info.mjs` | 裝置／瀏覽器資訊、Cloudflare 出口 IP／Colo／Location 與 AWS IP fallback |
 | `speed-test.mjs` | 測速計算必須保持純函數並由 `tests.html` 覆蓋 |
 | `report.mjs` | 組合中英文文字報告，不直接讀取 DOM |
 | `index.html` | 維持語義化標記、無障礙 label 與固定 DOM ID |
 | `styles.css` | 顏色使用 CSS variables；響應式斷點目前為 1360、980、680 px |
-| `tests.html` | 核心與安全邊界回歸測試；目前應顯示 `PASS 13/13` |
-| `e2e/` | 驗證 1366 × 650 首屏、縮時完整流程、IT 報告及 Public IP 不回歸 |
+| `tests.html` | 核心與安全邊界回歸測試；目前應顯示 `PASS 14/14` |
+| `e2e/` | 驗證 1366 × 650 首屏、縮時完整流程、對外出口 IP、Tooltip 與 IT 報告 |
 
 ## 4. 本機啟動
 
@@ -323,17 +295,17 @@ Endpoint、Fallback、Download URL、Stress 與 Webhook 不接受 Query String �
 - Rating 解鎖及 Loss bottleneck cap
 - HTTPS-only URL 驗證、automation 目的地封鎖、clamp、autostart 及 multiple export parsing
 - 最後 30 秒測速階段的 02:30／03:00 邊界
-- OS／Browser 與 WebRTC candidate 純解析
+- OS／Browser、Cloudflare trace 與 IPv4／IPv6 純解析
 - 測速暖機排除、分段中位數及 aggregate fallback
 - 固定時間輸入的報告編號
 
-目前執行結果為：`PASS 13/13`。
+目前執行結果為：`PASS 14/14`。
 
 本次 UI 回歸另以 Chrome 驗證 1920 × 768 與 1366 × 650：一般模式均為白色背景、主要區塊左右邊界一致，1366 × 650 可在首屏完整顯示而不需捲動。
 
-設備 IP 調整後另以 Edge 152、1366 × 650 驗證：欄位與報告已移除 Public IP；瀏覽器未揭露 WebRTC host candidate 時正確顯示「瀏覽器未提供」。模組化後 Edge 152 可正常載入主畫面，執行後 DOM 無 SyntaxError／ReferenceError。
+模組化後 Edge 152、1366 × 650 可正常載入主畫面，執行後 DOM 無 SyntaxError／ReferenceError。
 
-Playwright `e2e/netpulse.spec.mjs` 另驗證：`tests.html` 全數通過、1366 × 650 首屏無捲動、縮時完整診斷自動完成、IT 報告包含設備 IP／測速方法／下載端點，且不含 Public IP。縮時常數只由 `page.addInitScript()` 注入 `globalThis.__NETPULSE_TEST_CONFIG__`，不接受 URL 參數，也不改變正式三分鐘常數。
+Playwright `e2e/netpulse.spec.mjs` 另驗證：`tests.html` 全數通過、1366 × 650 首屏無捲動、縮時完整診斷自動完成、畫面取得對外出口 IP、Tooltip 正確，且 IT 報告包含對外出口 IP／測速方法／下載端點。縮時常數只由 `page.addInitScript()` 注入 `globalThis.__NETPULSE_TEST_CONFIG__`，不接受 URL 參數，也不改變正式三分鐘常數。
 
 ### 8.2 已完成的瀏覽器 Smoke Test
 
@@ -393,26 +365,26 @@ report.mjs
 
 ```js
 // core.mjs
-export const VERSION = '1.0.2';
+export const VERSION = '1.0.3';
 ```
 
 頁首、JSON 報告及 PNG 報告都會讀取此常數。發版時：
 
 1. 更新 `core.mjs` 的 `VERSION`。
-2. 執行 `tests.html`，確認 `PASS 13/13`。
+2. 執行 `tests.html`，確認 `PASS 14/14`。
 3. 在有 Node.js 的環境執行 `npm ci` 與 `npm test`。
 4. 完成第 8.3 節 Smoke Test。
 5. 檢查 README 與本手冊是否需要同步。
 6. 以 `git diff --check` 檢查後提交並推送；GitHub Actions 必須通過。
 
-### 10.1 2026-09-10 部署紀錄
+### 10.1 2026-09-10 部署紀錄（歷史，IP 行為已由 10.3 取代）
 
 - 功能基準提交：`d8ed28a`（設備 IP 取代 Public IP）。
 - 遠端分支：`main`。
 - Pages 驗證：首頁、`app.mjs` 與設備 IP 欄位均已更新。
 - 回歸結果：核心測試 `PASS 10/10`；Edge 152、1366 × 650 載入與首屏版面正常。
 
-### 10.2 2026-09-11 改善紀錄
+### 10.2 2026-09-11 改善紀錄（當時基於設備 IP）
 
 - 發布版本：`v1.0.2`。
 - 本機 `NetPulse_Consumer` 已直接初始化為獨立 Git 工作目錄，`main` 追蹤 `origin/main`；後續不再以暫存 clone 搬運檔案。
@@ -423,12 +395,20 @@ export const VERSION = '1.0.2';
 - Playwright E2E：`2 passed`，包含瀏覽器測試頁與縮時完整 Consumer 流程。
 - `.github/workflows/ci.yml` 會在 `main` push／pull request 使用 `npm ci` 與 Chromium 執行測試。
 
+### 10.3 2026-09-11 出口 IP 調整
+
+- 發布版本：`v1.0.3`。
+- 需求由設備內網 IP 改為對外出口 IP；移除 WebRTC host candidate 偵測。
+- 畫面使用 `IP` 標籤與對外出口 Tooltip，IT／JSON 報告使用明確的 `publicIp` 命名。
+- Cloudflare Trace 為主要來源，AWS Check IP 為備援；例如公司網路可能顯示 `59.125.x.x`。
+- 瀏覽器單元測試：`PASS 14/14`；Playwright E2E：`2 passed`，包含出口 IP、Tooltip、首屏與 IT 報告驗證。
+
 ## 11. 已知限制與風險
 
 - Browser `no-cors` Probe 只能觀察請求是否完成或被瀏覽器拒絕，無法提供 ICMP 或封包層資訊。
 - 不同瀏覽器、CORS、DNS、VPN、代理伺服器及省電策略可能影響結果。
-- 設備 IP 使用無 STUN 伺服器的 WebRTC host candidate 進行本機偵測，不會以出口 IP 代替。Chrome 等瀏覽器可能基於隱私政策隱藏本機位址，此時顯示「瀏覽器未提供」。
-- Colo／Location 仰賴 Cloudflare trace；失敗時顯示 `—`，不影響主要檢測流程。
+- IP 顯示外部服務觀察到的出口位址；NAT、VPN、Proxy 或公司防火牆會影響結果，不能用來判定設備內網位址。
+- IP／Colo／Location 優先仰賴 Cloudflare trace，只有 IP 具 AWS fallback；全部失敗時顯示 `—`，不影響主要檢測流程。
 - Webhook 服務必須允許來源站的 CORS，否則瀏覽器會阻擋回應。
 - PNG 不依賴第三方腳本；完整頁面擷取失敗時會輸出本地摘要 PNG。
 - Event Log 目前主要使用英文事件字串；若要求完整中英文即時切換，應將事件改為 event key，render 時再查 i18n 字典。
